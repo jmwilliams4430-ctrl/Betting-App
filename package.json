@@ -1,0 +1,12 @@
+{
+  "name": "prop-streaks",
+  "private": true,
+  "type": "module",
+  "description": "Player prop hit rates for NFL, CFB, NBA and WNBA from ESPN game logs.",
+  "scripts": {
+    "build:data": "node scripts/build-data.mjs",
+    "serve": "python3 -m http.server 8080",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": { "node": ">=18" }
+}

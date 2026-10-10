@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0d10" />
+  <title>Prop Streaks</title>
+  <meta name="description" content="How often NFL, CFB, NBA and WNBA players hit their props — the most consistent hitters, ranked." />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <h1>Prop Streaks</h1>
+      <p class="sub">Most consistent player props, from real game logs</p>
+    </div>
+    <nav class="leagues" id="leagues" aria-label="League"></nav>
+  </header>
+
+  <section class="controls" aria-label="Filters">
+    <div class="seg" id="view" role="tablist" aria-label="View">
+      <button data-v="top" role="tab">Top hitters</button>
+      <button data-v="sheet" role="tab">Cheatsheet</button>
+    </div>
+
+    <label class="field">
+      <span>Sample</span>
+      <select id="window">
+        <option value="5">Last 5</option>
+        <option value="10">Last 10</option>
+        <option value="15">Last 15</option>
+        <option value="20">Last 20</option>
+        <option value="season">This season</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Hit rate</span>
+      <select id="minRate">
+        <option value="1">100%</option>
+        <option value="0.9">90%+</option>
+        <option value="0.8">80%+</option>
+        <option value="0.7">70%+</option>
+      </select>
+    </label>
+
+    <label class="field grow">
+      <span>Search</span>
+      <input id="search" type="search" placeholder="Player or team" autocomplete="off" />
+    </label>
+
+    <div class="toggles">
+      <label class="chk"><input type="checkbox" id="upcoming" /> Playing next</label>
+      <label class="chk"><input type="checkbox" id="onePer" /> Best prop per player</label>
+    </div>
+
+    <div class="chips" id="markets" aria-label="Prop type"></div>
+  </section>
+
+  <main>
+    <div class="status" id="status" role="status" aria-live="polite"></div>
+    <div id="results"></div>
+  </main>
+
+  <footer class="foot">
+    <span id="updated"></span>
+    <button id="refresh" class="link">Refresh from ESPN</button>
+    <p class="fine">Stats via ESPN's public game logs. “X+” means the player hit X or more. Past results don't guarantee future outcomes — bet responsibly.</p>
+    <details id="diag" hidden><summary>Diagnostics</summary><pre id="diagText"></pre></details>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
