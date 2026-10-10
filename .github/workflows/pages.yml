@@ -2,7 +2,6 @@ name: Update stats & deploy site
 
 on:
   push:
-    branches: [main]
   workflow_dispatch:
   schedule:
     - cron: '17 */4 * * *' # every 4 hours
@@ -18,7 +17,12 @@ concurrency:
 
 jobs:
   build:
+    # Deploy only from the repo's default branch (whatever it is named).
+    if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

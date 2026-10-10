@@ -32,7 +32,7 @@ If `data/<league>.json` is missing or older than 36 hours, the page pulls the ga
 
 `.github/workflows/pages.yml` runs the tests, rebuilds the data every 4 hours and deploys the site. To turn it on:
 
-1. Merge to `main`.
+1. Make sure the code is on the default branch.
 2. Go to **Settings → Pages → Build and deployment → Source** and select **GitHub Actions**.
 3. Go to **Actions → "Update stats & deploy site" → Run workflow** for the first deploy.
 
