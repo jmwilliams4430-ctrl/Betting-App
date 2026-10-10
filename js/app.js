@@ -1,4 +1,4 @@
-import { LEAGUES, LEAGUE_KEYS } from './config.js';
+import { LEAGUES, LEAGUE_KEYS, LINE_FLOORS, DEFAULT_FLOOR } from './config.js';
 import { buildLeagueData } from './espn.js';
 import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, formatNote } from './props.js';
 
@@ -32,6 +32,7 @@ const state = {
   view: 'top',
   window: '10',
   minRate: '0.8',
+  floor: String(DEFAULT_FLOOR),
   market: 'all',
   search: '',
   upcoming: true,
@@ -45,8 +46,8 @@ const state = {
 if (!LEAGUES[state.league]) state.league = 'nfl';
 
 function savePrefs() {
-  const { league, view, window, minRate, market, upcoming, onePer } = state;
-  store.set('prefs', { league, view, window, minRate, market, upcoming, onePer });
+  const { league, view, window, minRate, floor, market, upcoming, onePer } = state;
+  store.set('prefs', { league, view, window, minRate, floor, market, upcoming, onePer });
 }
 
 // ---------- data loading ----------
@@ -143,6 +144,7 @@ function opts() {
   return {
     window: state.window === 'season' ? 'season' : Number(state.window),
     minRate: Number(state.minRate),
+    floor: Number(state.floor),
     minGames: state.window === 'season' ? 3 : Math.min(5, Number(state.window)),
   };
 }
@@ -173,6 +175,7 @@ function renderChrome() {
   for (const b of $('view').querySelectorAll('button')) b.setAttribute('aria-selected', String(b.dataset.v === state.view));
   $('window').value = state.window;
   $('minRate').value = state.minRate;
+  $('floor').value = state.floor;
   $('upcoming').checked = state.upcoming;
   $('onePer').checked = state.onePer;
   const cfg = LEAGUES[state.league];
@@ -213,7 +216,7 @@ function render() {
 
   if (!rows.length) {
     $('results').innerHTML = (d.players || []).length
-      ? `<div class="empty">Nothing clears that bar. Try a lower hit rate or a bigger sample.</div>`
+      ? `<div class="empty">Nothing clears that bar. Try a lower hit rate, a different sample, or “Deep alts” under Lines.</div>`
       : '';
     return;
   }
@@ -248,7 +251,7 @@ function renderList(rows, d) {
         <span class="who">
           <div class="name">${esc(p.name)}</div>
           <div class="meta">${esc(p.team)}${p.pos ? ` · ${esc(p.pos)}` : ''}${gameTag(d, p)}</div>
-          <div class="prop"><b>${r.line}+</b> ${esc(r.market.label)} <span class="pct">· avg ${fmt(r.avg)}</span></div>
+          <div class="prop"><b>${r.line}+</b> ${esc(r.market.label)} <span class="pct">· median ${fmt(r.typical)}</span></div>
         </span>
         <span class="score ${perfect ? 'perfect' : ''}">
           <div class="frac">${r.hits}/${r.n}</div>
@@ -379,7 +382,7 @@ $('markets').addEventListener('click', (e) => {
   render();
 });
 
-for (const [id, key] of [['window', 'window'], ['minRate', 'minRate']]) {
+for (const [id, key] of [['window', 'window'], ['minRate', 'minRate'], ['floor', 'floor']]) {
   $(id).addEventListener('change', (e) => {
     state[key] = e.target.value;
     state.custom = {};
@@ -430,5 +433,7 @@ $('results').addEventListener('click', async (e) => {
 
 $('refresh').addEventListener('click', () => ensureData(true));
 
+$('floor').innerHTML = LINE_FLOORS.map((f) => `<option value="${f.value}">${esc(f.label)}</option>`).join('');
+if (!LINE_FLOORS.some((f) => String(f.value) === state.floor)) state.floor = String(DEFAULT_FLOOR);
 renderChrome();
 ensureData();

@@ -1,6 +1,18 @@
 // Hit-rate math. Pure functions over the JSON produced by espn.js.
 
-export const DEFAULT_OPTS = { window: 10, minRate: 0.8, minGames: 5 };
+import { DEFAULT_FLOOR } from './config.js';
+
+export const DEFAULT_OPTS = { window: 10, minRate: 0.8, minGames: 5, floor: DEFAULT_FLOOR };
+
+// How many recent games define a player's "typical" number (what books set lines around).
+const TYPICAL_GAMES = 20;
+
+export function median(values) {
+  if (!values.length) return 0;
+  const v = [...values].sort((a, b) => a - b);
+  const mid = v.length >> 1;
+  return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
+}
 
 // Games in the chosen window, most recent first. window: number | 'season'.
 export function sampleGames(games, window) {
@@ -24,6 +36,7 @@ export function lineStats(values, line) {
 
 /**
  * Best (highest) alt line that still hits at least `minRate` of the time in the window.
+ * Lines below `floor` x the player's median are skipped: no book offers them at real odds.
  * Returns null when the player isn't a fit for the market or nothing qualifies.
  */
 export function bestLine(player, market, opts = DEFAULT_OPTS) {
@@ -32,24 +45,26 @@ export function bestLine(player, market, opts = DEFAULT_OPTS) {
   if (sample.length < minGames) return null;
   if (!market.eligible(player.games.slice(0, 10))) return null;
   const values = sample.map((g) => market.value(g) ?? 0);
+  const typical = median(player.games.slice(0, TYPICAL_GAMES).map((g) => market.value(g) ?? 0));
+  const floor = market.yesNo ? 0 : (opts.floor ?? DEFAULT_FLOOR) * typical;
   for (let i = market.ladder.length - 1; i >= 0; i--) {
-    const st = lineStats(values, market.ladder[i]);
+    const line = market.ladder[i];
+    if (line < floor) break;
+    const st = lineStats(values, line);
     if (st.rate >= opts.minRate) {
       const avg = values.reduce((a, b) => a + b, 0) / values.length;
-      return { player, market, values, games: sample, avg, ladderIndex: i, ...st };
+      return { player, market, values, games: sample, avg, typical, ladderIndex: i, ...st };
     }
   }
   return null;
 }
 
-// Higher = more trustworthy: hit rate first, then sample size, then cushion over the line.
+// How close the line sits to the player's typical number (1 = right at the main line).
+const lineStrength = (r) => (r.typical > 0 ? r.line / r.typical : 1);
+
+// Higher = better: hit rate first, then sample size, then the line closest to the main line.
 export function compareRows(a, b) {
-  return (
-    b.rate - a.rate ||
-    b.hits - a.hits ||
-    b.streak - a.streak ||
-    b.avg / b.line - a.avg / a.line
-  );
+  return b.rate - a.rate || b.hits - a.hits || lineStrength(b) - lineStrength(a) || b.streak - a.streak;
 }
 
 export function computeRows(players, markets, opts = DEFAULT_OPTS) {

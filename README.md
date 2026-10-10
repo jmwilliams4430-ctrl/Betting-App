@@ -6,7 +6,15 @@ A cheatsheet-style website showing how often NFL, college football, NBA and WNBA
 - **Cheatsheet**: the same results grouped by position in the "Stroud 200+ Pass Yds 4/5 (Missed last)" format, with a Copy button.
 - Filters: sample (last 5/10/15/20 or this season), minimum hit rate, prop type, search, "Playing next" (teams on the upcoming slate), and "Best prop per player".
 
-For each player and prop, the site tests a ladder of alt lines (for example 150/175/200/225… pass yards) and shows the **highest line that still clears your hit rate**.
+For each player and prop, the site tests sportsbook-style alt lines (for example 175/200/225/250… pass yards, or 10/15/20/25… points) and shows the **highest line that still clears your hit rate**.
+
+Sportsbooks set the main line near a player's median, so lines far below it aren't offered, or pay almost nothing. The **Lines** setting controls how far below the median (from the last 20 games) a line can sit:
+
+- **Near main line**: at least 90% of the median.
+- **Alt lines** (default): at least 75%.
+- **Deep alts**: at least 60%.
+
+Yes/no bets like Anytime TD are always shown.
 
 ## Data
 

@@ -158,3 +158,23 @@ test('buildLeagueData discovers players, backfills last season and reads the sch
   assert.ok(calls.some((u) => u.includes('athletes/200/gamelog')), 'scoreboard leaders are added as players');
   assert.doesNotThrow(() => JSON.parse(JSON.stringify(data)));
 });
+
+test('gimme lines far below the player median are not offered', () => {
+  // RB who runs for ~80 every week; 25+ always hits but no book offers it at real odds.
+  const ys = [82, 75, 91, 68, 80, 77, 85, 62, 88, 79];
+  const games = ys.map((y) => ({ rushAtt: 18, rushYds: y, s: 2026 }));
+  const rushYds = LEAGUES.nfl.markets.find((m) => m.id === 'rushYds');
+  const r = bestLine({ id: '1', name: 'R B', games }, rushYds, { window: 10, minRate: 0.9, minGames: 5, floor: 0.75 });
+  assert.equal(r.line, 60);
+  assert.equal(r.typical, 79.5);
+  const strict = bestLine({ id: '1', name: 'R B', games }, rushYds, { window: 10, minRate: 1, minGames: 5, floor: 0.9 });
+  assert.equal(strict, null, 'nothing near the main line hits 10/10');
+});
+
+test('anytime TD is a yes/no bet and ignores the median floor', () => {
+  const games = Array.from({ length: 10 }, (_, i) => ({ rushAtt: 15, rushYds: 70, rushTd: i < 9 ? 1 : 0, recTd: 0, rec: 2, s: 2026 }));
+  const anyTd = LEAGUES.nfl.markets.find((m) => m.id === 'anyTd');
+  const r = bestLine({ id: '1', name: 'R B', games }, anyTd, { window: 10, minRate: 0.9, minGames: 5, floor: 0.9 });
+  assert.equal(r.line, 1);
+  assert.equal(r.hits, 9);
+});
