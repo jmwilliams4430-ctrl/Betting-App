@@ -90,3 +90,51 @@ export function formatNote(r) {
   if (r.streak >= 3 && r.streak < r.n) return `Hit last ${r.streak}`;
   return '';
 }
+
+// ---------- Best Bets: game-log hit rate vs prediction-market price ----------
+
+// Price (0-1) -> American odds, e.g. 0.64 -> "-178", 0.4 -> "+150".
+export function americanOdds(p) {
+  if (!(p > 0 && p < 1)) return '';
+  return p >= 0.5 ? `-${Math.round((100 * p) / (1 - p))}` : `+${Math.round((100 * (1 - p)) / p)}`;
+}
+
+// Hit rate pulled slightly toward 50% so tiny samples (5/5) don't look like sure things.
+export const smoothedRate = (hits, n) => (hits + 1) / (n + 2);
+
+/**
+ * Join market quotes ({v, name, m, line, price, cost, date, url}) to players by name and
+ * score each prop: edge = smoothed hit rate - cost of the YES side (fees included).
+ */
+export function bestBets(players, markets, quotes, nameKey, opts = DEFAULT_OPTS) {
+  const byName = new Map(players.map((p) => [nameKey(p.name), p]));
+  const byId = new Map(markets.map((m) => [m.id, m]));
+  const groups = new Map();
+  for (const q of quotes) {
+    const player = byName.get(nameKey(q.name));
+    const market = byId.get(q.m);
+    if (!player || !market) continue;
+    const key = `${player.id}:${market.id}:${q.line}`;
+    if (!groups.has(key)) groups.set(key, { player, market, line: q.line, byVenue: new Map() });
+    const g = groups.get(key);
+    const cur = g.byVenue.get(q.v);
+    // Same venue listing several games: keep the soonest one.
+    if (!cur || q.date < cur.date || (q.date === cur.date && q.cost < cur.cost)) g.byVenue.set(q.v, q);
+  }
+
+  const minGames = opts.window === 'season' ? Math.min(3, opts.minGames) : opts.minGames;
+  const rows = [];
+  for (const g of groups.values()) {
+    const games = sampleGames(g.player.games, opts.window);
+    if (games.length < minGames) continue;
+    const values = games.map((x) => g.market.value(x) ?? 0);
+    const st = lineStats(values, g.line);
+    const quotesSorted = [...g.byVenue.values()].sort((a, b) => a.cost - b.cost);
+    const best = quotesSorted[0];
+    const est = smoothedRate(st.hits, st.n);
+    const typical = median(g.player.games.slice(0, TYPICAL_GAMES).map((x) => g.market.value(x) ?? 0));
+    const avg = values.reduce((a, b) => a + b, 0) / values.length;
+    rows.push({ ...g, ...st, games, values, avg, typical, est, quotes: quotesSorted, best, edge: est - best.cost });
+  }
+  return rows.sort((a, b) => b.edge - a.edge || b.rate - a.rate);
+}

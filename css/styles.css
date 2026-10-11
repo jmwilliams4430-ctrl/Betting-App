@@ -55,6 +55,7 @@ button, select, input { font: inherit; color: inherit; }
   z-index: 5;
 }
 .seg { display: inline-flex; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+[hidden] { display: none !important; }
 .seg button { background: none; border: 0; padding: 7px 12px; border-radius: 8px; cursor: pointer; color: var(--muted); font-weight: 600; }
 .seg button[aria-selected="true"] { background: var(--panel-2); color: var(--text); }
 
@@ -126,6 +127,23 @@ button, select, input { font: inherit; color: inherit; }
 .dots i.m { background: var(--miss); }
 .dots .note { margin-left: 6px; font-size: 12px; color: var(--warn); }
 .dots .note.good { color: var(--accent); }
+
+/* Best bets */
+.explain { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+.score.edge .frac { color: var(--accent); }
+.prices { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 0 12px 10px; }
+.venue {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+}
+.venue span { color: var(--muted); font-weight: 400; }
+.venue.best { border-color: var(--accent); }
+.prices .vs { color: var(--muted); font-size: 12.5px; margin-left: 2px; }
 
 /* Expanded detail */
 .detail { border-top: 1px solid var(--line); padding: 12px; background: var(--panel-2); }

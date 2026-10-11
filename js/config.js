@@ -95,6 +95,13 @@ export const LEAGUES = {
     label: 'NFL',
     sport: 'football',
     league: 'nfl',
+    // Prediction-market player props for Best Bets: Kalshi series -> our market id, Polymarket tag.
+    kalshiSeries: {
+      KXNFLPASSYDS: 'passYds', KXNFLPASSTDS: 'passTd', KXNFLPASSCOMP: 'cmp', KXNFLPASSINT: 'int',
+      KXNFLRSHYDS: 'rushYds', KXNFLRSHATT: 'rushAtt', KXNFLRECYDS: 'recYds', KXNFLREC: 'rec',
+      KXNFLRRYDS: 'rushRecYds', KXNFLTD: 'anyTd',
+    },
+    polyTag: 'nfl',
     kind: 'football',
     stats: FOOTBALL_STATS,
     markets: FOOTBALL_MARKETS,
@@ -129,6 +136,11 @@ export const LEAGUES = {
     label: 'NBA',
     sport: 'basketball',
     league: 'nba',
+    kalshiSeries: {
+      KXNBAPTS: 'pts', KXNBAREB: 'reb', KXNBAAST: 'ast', KXNBA3PT: 'tpm', KXNBASTL: 'stl',
+      KXNBABLK: 'blk', KXNBAPRA: 'pra', KXNBAPR: 'pr', KXNBAPA: 'pa', KXNBARA: 'ra',
+    },
+    polyTag: 'nba',
     kind: 'basketball',
     stats: BASKETBALL_STATS,
     markets: BASKETBALL_MARKETS,
@@ -149,6 +161,9 @@ export const LEAGUES = {
     label: 'WNBA',
     sport: 'basketball',
     league: 'wnba',
+    // WNBA series names follow Kalshi's NBA pattern; unlisted ones are skipped quietly.
+    kalshiSeries: { KXWNBAPTS: 'pts', KXWNBAREB: 'reb', KXWNBAAST: 'ast', KXWNBA3PT: 'tpm' },
+    polyTag: 'wnba',
     kind: 'basketball',
     stats: BASKETBALL_STATS,
     markets: BASKETBALL_MARKETS,

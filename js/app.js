@@ -1,9 +1,13 @@
 import { LEAGUES, LEAGUE_KEYS, LINE_FLOORS, DEFAULT_FLOOR } from './config.js';
 import { buildLeagueData } from './espn.js';
-import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, formatNote } from './props.js';
+import { fetchMarketQuotes, nameKey } from './odds.js';
+import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, formatNote, bestBets, americanOdds } from './props.js';
 
 const STATIC_MAX_AGE = 36 * 3600e3; // pre-built data/*.json older than this triggers a live pull
 const CACHE_MAX_AGE = 3 * 3600e3;
+const ODDS_MAX_AGE = 12 * 3600e3; // pre-built market prices older than this are ignored
+const ODDS_REFRESH = 5 * 60e3; // re-pull live prices after this long
+const VENUES = { K: 'Kalshi', P: 'Polymarket' };
 const HEADSHOT_PATH = { nfl: 'nfl', cfb: 'college-football', nba: 'nba', wnba: 'wnba' };
 
 const $ = (id) => document.getElementById(id);
@@ -39,6 +43,7 @@ const state = {
   onePer: true,
   ...store.get('prefs', {}),
   data: {}, // league -> dataset
+  odds: {}, // league -> { quotes, venues, generatedAt, log, fetchedAt }
   expanded: null, // "playerId:marketId"
   custom: {}, // "playerId:marketId" -> custom line
   loading: false,
@@ -99,6 +104,7 @@ async function ensureData(force = false) {
   const key = state.league;
   if (state.data[key] && !force) return render();
   state.loading = true;
+  renderChrome();
   $('results').innerHTML = '';
   showProgress({ phase: 'players' });
   try {
@@ -110,6 +116,33 @@ async function ensureData(force = false) {
     state.loading = false;
   }
   if (key === state.league) render();
+}
+
+const hasMarkets = (key) => Boolean(LEAGUES[key].kalshiSeries || LEAGUES[key].polyTag);
+
+// Live prices from Kalshi + Polymarket, topped up per venue from the pre-built file
+// (Kalshi in particular may refuse requests straight from a browser).
+async function ensureOdds(force = false) {
+  const key = state.league;
+  if (!hasMarkets(key)) return;
+  const cur = state.odds[key];
+  if (cur && (cur.loading || (!force && Date.now() - cur.fetchedAt < ODDS_REFRESH))) return;
+  state.odds[key] = { ...(cur || { quotes: [], venues: {}, log: [] }), loading: true };
+  if (state.view === 'bets') render();
+  const [live, stat] = await Promise.all([fetchMarketQuotes(LEAGUES[key]), fetchStatic(`${key}-odds`)]);
+  const quotes = [];
+  const venues = {};
+  for (const v of Object.keys(VENUES)) {
+    if (live.venues[v]) {
+      quotes.push(...live.quotes.filter((q) => q.v === v));
+      venues[v] = 'live';
+    } else if (stat && stat.venues && stat.venues[v] && age(stat) < ODDS_MAX_AGE) {
+      quotes.push(...stat.quotes.filter((q) => q.v === v));
+      venues[v] = stat.generatedAt;
+    }
+  }
+  state.odds[key] = { quotes, venues, log: live.log, fetchedAt: Date.now(), loading: false };
+  if (key === state.league && state.view === 'bets') render();
 }
 
 // ---------- helpers ----------
@@ -154,11 +187,21 @@ function filteredRows(d) {
   const q = state.search.trim().toLowerCase();
   const hasSchedule = Object.keys(d.schedule || {}).length > 0;
   let players = d.players || [];
-  if (state.upcoming && hasSchedule) players = players.filter((p) => nextGame(d, p));
+  if (state.upcoming && hasSchedule && state.view !== 'bets') players = players.filter((p) => nextGame(d, p));
   if (q) players = players.filter((p) => `${p.name} ${p.team}`.toLowerCase().includes(q));
   const markets = state.market === 'all' ? cfg.markets : cfg.markets.filter((m) => m.id === state.market);
-  let rows = computeRows(players, markets, opts());
+  let rows;
+  let priced = 0;
+  if (state.view === 'bets') {
+    const odds = state.odds[state.league];
+    rows = bestBets(players, markets, (odds && odds.quotes) || [], nameKey, opts());
+    priced = rows.length;
+    rows = rows.filter((r) => r.edge > 0);
+  } else {
+    rows = computeRows(players, markets, opts());
+  }
   if (state.onePer && state.market === 'all') rows = onePerPlayer(rows);
+  rows.priced = priced;
   return { rows, hasSchedule };
 }
 
@@ -172,7 +215,14 @@ function renderChrome() {
   $('leagues').innerHTML = LEAGUE_KEYS.map(
     (k) => `<button data-league="${k}" aria-pressed="${k === state.league}">${LEAGUES[k].label}</button>`,
   ).join('');
-  for (const b of $('view').querySelectorAll('button')) b.setAttribute('aria-selected', String(b.dataset.v === state.view));
+  if (state.view === 'bets' && !hasMarkets(state.league)) state.view = 'top';
+  for (const b of $('view').querySelectorAll('button')) {
+    b.setAttribute('aria-selected', String(b.dataset.v === state.view));
+    if (b.dataset.v === 'bets') b.hidden = !hasMarkets(state.league);
+  }
+  // Best Bets uses each market's own line, so the line pickers don't apply there.
+  for (const id of ['minRate', 'floor']) $(id).closest('.field').hidden = state.view === 'bets';
+  $('upcoming').closest('.chk').hidden = state.view === 'bets';
   $('window').value = state.window;
   $('minRate').value = state.minRate;
   $('floor').value = state.floor;
@@ -201,6 +251,9 @@ function render() {
     status.innerHTML =
       `Couldn't load ${esc(LEAGUES[state.league].label)} stats (${esc(d.error.message || d.error)}). ` +
       `If ESPN is blocked from your browser, deploy with the included GitHub Action so data is pre-built.`;
+  } else if (state.view === 'bets') {
+    bits.push(...betsStatus(rows));
+    status.innerHTML = bits.join(' · ');
   } else {
     bits.push(`<b>${rows.length}</b> props hitting ${Math.round(Number(state.minRate) * 100)}%+ over the ${windowLabel()}`);
     if (state.upcoming && !hasSchedule) bits.push('no upcoming schedule found, showing everyone');
@@ -210,17 +263,23 @@ function render() {
 
   const when = d.generatedAt ? new Date(d.generatedAt) : null;
   $('updated').textContent = when ? `Updated ${when.toLocaleString()}` : '';
-  const log = d.log || [];
+  const odds = state.view === 'bets' && state.odds[state.league];
+  const log = [...(d.log || []), ...((odds && odds.log) || [])];
   $('diag').hidden = !log.length;
   $('diagText').textContent = log.join('\n');
 
   if (!rows.length) {
-    $('results').innerHTML = (d.players || []).length
-      ? `<div class="empty">Nothing clears that bar. Try a lower hit rate, a different sample, or “Deep alts” under Lines.</div>`
-      : '';
+    const msg =
+      state.view === 'bets'
+        ? odds && !odds.loading && (odds.quotes || []).length
+          ? 'None of the listed props beat their price over this sample right now. Try a different sample.'
+          : ''
+        : 'Nothing clears that bar. Try a lower hit rate, a different sample, or “Deep alts” under Lines.';
+    $('results').innerHTML = (d.players || []).length && msg ? `<div class="empty">${msg}</div>` : '';
     return;
   }
-  $('results').innerHTML = state.view === 'sheet' ? renderSheet(rows, d) : renderList(rows, d);
+  $('results').innerHTML =
+    state.view === 'sheet' ? renderSheet(rows, d) : state.view === 'bets' ? renderBets(rows, d) : renderList(rows, d);
 }
 
 function gameTag(d, p) {
@@ -323,6 +382,54 @@ function chart(games, values, line) {
   </svg>`;
 }
 
+function betsStatus(rows) {
+  const odds = state.odds[state.league];
+  if (!odds || odds.loading) return ['Loading Kalshi and Polymarket prices…'];
+  const venues = Object.entries(odds.venues || {});
+  if (!venues.length) return ['Couldn\'t reach Kalshi or Polymarket right now. Try “Refresh” in a minute.'];
+  if (!odds.quotes.length) return [`No ${esc(LEAGUES[state.league].label)} player props are listed on ${venues.map(([v]) => VENUES[v]).join(' or ')} right now.`];
+  const bits = [`<b>${rows.length}</b> of ${rows.priced || 0} priced props beat the market over the ${windowLabel()}`];
+  const missing = Object.keys(VENUES).filter((v) => !odds.venues[v]);
+  if (missing.length) bits.push(`${missing.map((v) => VENUES[v]).join(', ')} unavailable`);
+  const old = venues.filter(([, when]) => when !== 'live');
+  for (const [v, when] of old) bits.push(`${VENUES[v]} prices from ${new Date(when).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
+  return bits;
+}
+
+const pct = (x) => `${Math.round(x * 100)}%`;
+const cents = (p) => `${Math.round(p * 100)}¢`;
+
+function renderBets(rows, d) {
+  const items = rows.slice(0, 150).map((r, i) => {
+    const p = r.player;
+    const key = `b:${p.id}:${r.market.id}:${r.line}`;
+    const open = state.expanded === key;
+    const prices = r.quotes
+      .map((q) => `<a href="${esc(q.url)}" target="_blank" rel="noopener" class="venue${q === r.best ? ' best' : ''}">${VENUES[q.v]} ${cents(q.price)} <span>(${americanOdds(q.cost)})</span></a>`)
+      .join('');
+    return `<li class="row">
+      <button data-expand="${esc(key)}" aria-expanded="${open}">
+        <span class="rank">${i + 1}</span>
+        <img class="avatar" src="${headshot(p)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+        <span class="who">
+          <div class="name">${esc(p.name)}</div>
+          <div class="meta">${esc(p.team)}${p.pos ? ` · ${esc(p.pos)}` : ''}${gameTag(d, p)}</div>
+          <div class="prop"><b>${r.line}+</b> ${esc(r.market.label)} <span class="pct">· hit ${r.hits}/${r.n} · median ${fmt(r.typical)}</span></div>
+        </span>
+        <span class="score edge">
+          <div class="frac">+${Math.round(r.edge * 100)}%</div>
+          <div class="pct">edge</div>
+        </span>
+        <span class="dots">${dots(r)}</span>
+      </button>
+      <div class="prices">${prices}<span class="vs">Hits ${pct(r.rate)} vs market ${pct(r.best.cost)}</span></div>
+      ${open ? renderDetail(r) : ''}
+    </li>`;
+  });
+  return `<p class="explain">Edge = how often the player has cleared the market's line (adjusted for small samples) minus what the market charges, Kalshi's fee included. Past hit rates don't account for injuries, matchups or role changes — use it as a starting point.</p>
+    <ul class="list">${items.join('')}</ul>`;
+}
+
 function renderSheet(rows, d) {
   const cfg = LEAGUES[state.league];
   const names = shortNames(rows.map((r) => r.player));
@@ -364,14 +471,17 @@ $('leagues').addEventListener('click', (e) => {
   state.expanded = null;
   savePrefs();
   ensureData();
+  ensureOdds();
 });
 
 $('view').addEventListener('click', (e) => {
   const b = e.target.closest('[data-v]');
   if (!b) return;
   state.view = b.dataset.v;
+  state.expanded = null;
   savePrefs();
   render();
+  if (state.view === 'bets') ensureOdds();
 });
 
 $('markets').addEventListener('click', (e) => {
@@ -431,9 +541,13 @@ $('results').addEventListener('click', async (e) => {
   }
 });
 
-$('refresh').addEventListener('click', () => ensureData(true));
+$('refresh').addEventListener('click', () => {
+  ensureData(true);
+  if (state.view === 'bets') ensureOdds(true);
+});
 
 $('floor').innerHTML = LINE_FLOORS.map((f) => `<option value="${f.value}">${esc(f.label)}</option>`).join('');
 if (!LINE_FLOORS.some((f) => String(f.value) === state.floor)) state.floor = String(DEFAULT_FLOOR);
 renderChrome();
 ensureData();
+if (state.view === 'bets') ensureOdds();

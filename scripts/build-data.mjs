@@ -3,6 +3,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { LEAGUES, LEAGUE_KEYS } from '../js/config.js';
 import { buildLeagueData } from '../js/espn.js';
+import { fetchMarketQuotes } from '../js/odds.js';
 
 const keys = process.argv.slice(2).length ? process.argv.slice(2) : LEAGUE_KEYS;
 const outDir = new URL('../data/', import.meta.url);
@@ -28,5 +29,14 @@ for (const key of keys) {
     continue;
   }
   await writeFile(new URL(`${key}.json`, outDir), JSON.stringify(data));
+
+  // Kalshi / Polymarket prices for Best Bets (the browser tops these up live when it can).
+  if (cfg.kalshiSeries || cfg.polyTag) {
+    const odds = await fetchMarketQuotes(cfg, { pace: 400 });
+    const by = (v) => odds.quotes.filter((q) => q.v === v).length;
+    console.log(`  markets: Kalshi ${odds.venues.K ? by('K') : 'unavailable'}, Polymarket ${odds.venues.P ? by('P') : 'unavailable'}`);
+    for (const line of odds.log.slice(0, 8)) console.log(`  ! ${line}`);
+    await writeFile(new URL(`${key}-odds.json`, outDir), JSON.stringify(odds));
+  }
 }
 if (failures === keys.length) process.exitCode = 1;
