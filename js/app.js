@@ -7,7 +7,7 @@ const STATIC_MAX_AGE = 36 * 3600e3; // pre-built data/*.json older than this tri
 const CACHE_MAX_AGE = 3 * 3600e3;
 const ODDS_MAX_AGE = 12 * 3600e3; // pre-built market prices older than this are ignored
 const ODDS_REFRESH = 5 * 60e3; // re-pull live prices after this long
-const VENUES = { K: 'Kalshi', P: 'Polymarket' };
+const VENUES = { K: 'Kalshi', P: 'Polymarket US' };
 const HEADSHOT_PATH = { nfl: 'nfl', cfb: 'college-football', nba: 'nba', wnba: 'wnba' };
 
 const $ = (id) => document.getElementById(id);
@@ -384,9 +384,9 @@ function chart(games, values, line) {
 
 function betsStatus(rows) {
   const odds = state.odds[state.league];
-  if (!odds || odds.loading) return ['Loading Kalshi and Polymarket prices…'];
+  if (!odds || odds.loading) return ['Loading Kalshi and Polymarket US prices…'];
   const venues = Object.entries(odds.venues || {});
-  if (!venues.length) return ['Couldn\'t reach Kalshi or Polymarket right now. Try “Refresh” in a minute.'];
+  if (!venues.length) return ['Couldn\'t reach Kalshi or Polymarket US right now. Try “Refresh” in a minute.'];
   if (!odds.quotes.length) return [`No ${esc(LEAGUES[state.league].label)} player props are listed on ${venues.map(([v]) => VENUES[v]).join(' or ')} right now.`];
   const bits = [`<b>${rows.length}</b> of ${rows.priced || 0} priced props beat the market over the ${windowLabel()}`];
   const missing = Object.keys(VENUES).filter((v) => !odds.venues[v]);
@@ -405,7 +405,7 @@ function renderBets(rows, d) {
     const key = `b:${p.id}:${r.market.id}:${r.line}`;
     const open = state.expanded === key;
     const prices = r.quotes
-      .map((q) => `<a href="${esc(q.url)}" target="_blank" rel="noopener" class="venue${q === r.best ? ' best' : ''}">${VENUES[q.v]} ${cents(q.price)} <span>(${americanOdds(q.cost)})</span></a>`)
+      .map((q) => `<a href="${esc(q.url)}" target="_blank" rel="noopener" class="venue${q === r.best ? ' best' : ''}">${VENUES[q.v]} ${cents(q.price)} <span>(${americanOdds(q.price)})</span></a>`)
       .join('');
     return `<li class="row">
       <button data-expand="${esc(key)}" aria-expanded="${open}">
@@ -422,11 +422,11 @@ function renderBets(rows, d) {
         </span>
         <span class="dots">${dots(r)}</span>
       </button>
-      <div class="prices">${prices}<span class="vs">Hits ${pct(r.rate)} vs market ${pct(r.best.cost)}</span></div>
+      <div class="prices">${prices}<span class="vs">Hits ${pct(r.rate)} vs ${pct(r.best.cost)} to buy after fees</span></div>
       ${open ? renderDetail(r) : ''}
     </li>`;
   });
-  return `<p class="explain">Edge = how often the player has cleared the market's line (adjusted for small samples) minus what the market charges, Kalshi's fee included. Past hit rates don't account for injuries, matchups or role changes — use it as a starting point.</p>
+  return `<p class="explain">Edge = how often the player has cleared the market's line (adjusted for small samples) minus what it costs to buy on Kalshi or Polymarket US, with each one's trading fee added. Prices and odds shown are exactly what each app shows, before fees. Past hit rates don't account for injuries, matchups or role changes — use it as a starting point.</p>
     <ul class="list">${items.join('')}</ul>`;
 }
 

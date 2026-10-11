@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { LEAGUES } from '../js/config.js';
-import { parseKalshiMarket, parsePolyMarket, fetchMarketQuotes, nameKey, kalshiFee } from '../js/odds.js';
+import { parseKalshiMarket, parsePolyUsMarket, fetchMarketQuotes, nameKey, kalshiFee, polyFee } from '../js/odds.js';
 import { bestBets } from '../js/props.js';
 
 test('Kalshi rung "Player: 250+" parses to a 250+ quote with fee in the cost', () => {
@@ -14,7 +14,7 @@ test('Kalshi rung "Player: 250+" parses to a 250+ quote with fee in the cost', (
   assert.equal(q.line, 250);
   assert.equal(q.date, '2026-10-12');
   assert.equal(q.price, 0.64);
-  assert.equal(q.cost, 0.64 + kalshiFee(0.64));
+  assert.ok(Math.abs(q.cost - (0.64 + kalshiFee(0.64))) < 1e-12);
 });
 
 test('Kalshi markets with no real price or a huge spread are dropped', () => {
@@ -23,32 +23,47 @@ test('Kalshi markets with no real price or a huge spread are dropped', () => {
   assert.equal(parseKalshiMarket({ ...base, yes_ask_dollars: '0.6000', yes_bid_dollars: '0.3000' }, 'pts', 'KXNBAPTS'), null);
 });
 
-test('Polymarket "O/U 249.5" becomes 250+ and uses the Over ask', () => {
-  const q = parsePolyMarket(
-    { question: 'C.J. Stroud: Passing Yards O/U 249.5', outcomes: '["Over","Under"]', outcomePrices: '["0.6","0.4"]', bestAsk: 0.61, bestBid: 0.59 },
+test('Polymarket US "250+" market uses the app price, with the fee only in the cost', () => {
+  const q = parsePolyUsMarket(
+    {
+      sportsMarketType: 'football_player_passing_yards',
+      line: 250,
+      title: 'C.J. Stroud 250+ Passing Yards',
+      subject: { name: 'C.J. Stroud' },
+      bestAskQuote: { value: '0.64', currency: 'USD' },
+      bestBidQuote: { value: '0.62', currency: 'USD' },
+      status: 'MARKET_STATUS_OPEN',
+    },
     'football',
-    'nfl-hou-buf-2026-10-12-player-props',
+    'nfl-hou-buf-2026-10-12',
     '2026-10-12',
   );
+  assert.equal(q.name, 'C.J. Stroud');
   assert.equal(q.m, 'passYds');
   assert.equal(q.line, 250);
-  assert.equal(q.price, 0.61);
-  const flipped = parsePolyMarket(
-    { question: 'Josh Allen: Rushing Yards O/U 29.5', outcomes: ['Under', 'Over'], bestAsk: 0.55, bestBid: 0.5 },
-    'football',
-    's',
-    '2026-10-12',
-  );
-  assert.equal(flipped.m, 'rushYds');
-  assert.equal(flipped.price, 0.5); // Over listed second: buy Over = 1 - Under bid
+  assert.equal(q.price, 0.64);
+  assert.ok(Math.abs(q.cost - (0.64 + polyFee(0.64))) < 1e-12);
+  assert.equal(q.url, 'https://polymarket.us/event/nfl-hou-buf-2026-10-12');
+});
+
+test('Polymarket US: name from the title, closed and one-sided markets dropped, non-player markets ignored', () => {
+  const base = { sportsMarketType: 'football_player_rushing_yards', line: 60, title: 'Josh Allen 60+ Rushing Yards', bestAskQuote: { value: '0.30' } };
+  assert.equal(parsePolyUsMarket(base, 'football', 's', 'd').name, 'Josh Allen');
+  assert.equal(parsePolyUsMarket({ ...base, status: 'MARKET_STATUS_CLOSED' }, 'football', 's', 'd'), null);
+  assert.equal(parsePolyUsMarket({ ...base, bestAskQuote: { value: '0.30' }, bestBidQuote: { value: '0.05' } }, 'football', 's', 'd'), null);
+  assert.equal(parsePolyUsMarket({ ...base, sportsMarketType: 'football_game_moneyline' }, 'football', 's', 'd'), null);
+  assert.equal(parsePolyUsMarket({ ...base, sportsMarketType: 'football_player_fantasy_points_ppr' }, 'football', 's', 'd'), null);
+  assert.equal(parsePolyUsMarket({ ...base, sportsMarketType: 'football_player_touchdowns', line: 1 }, 'football', 's', 'd').m, 'anyTd');
 });
 
 test('basketball combos map before single stats', () => {
-  const mk = (stat) => parsePolyMarket({ question: `Nikola Jokic: ${stat} O/U 45.5`, outcomes: ['Over', 'Under'], bestAsk: 0.5 }, 'basketball', 's', '2026-10-21').m;
-  assert.equal(mk('Pts + Reb + Ast'), 'pra');
-  assert.equal(mk('Points + Rebounds'), 'pr');
-  assert.equal(mk('Rebounds'), 'reb');
-  assert.equal(mk('Points'), 'pts');
+  const mk = (type) =>
+    parsePolyUsMarket({ sportsMarketType: `basketball_player_${type}`, line: 30, subject: { name: 'Nikola Jokic' }, bestAskQuote: { value: '0.5' } }, 'basketball', 's', 'd')?.m;
+  assert.equal(mk('points_rebounds_assists'), 'pra');
+  assert.equal(mk('points_rebounds'), 'pr');
+  assert.equal(mk('rebounds'), 'reb');
+  assert.equal(mk('points'), 'pts');
+  assert.equal(mk('three_pointers_made'), 'tpm');
 });
 
 test('nameKey matches across punctuation, accents and suffixes', () => {
@@ -60,7 +75,13 @@ test('nameKey matches across punctuation, accents and suffixes', () => {
 test('fetchMarketQuotes survives one venue failing', async () => {
   const fetchJson = async (url) => {
     if (url.includes('kalshi')) throw new Error('HTTP 403');
-    return [{ slug: 'nfl-hou-buf-2026-10-12-player-props', markets: [{ question: 'C.J. Stroud: Passing Yards O/U 249.5', outcomes: ['Over', 'Under'], bestAsk: 0.6 }] }];
+    assert.ok(url.startsWith('https://gateway.polymarket.us/v1/events?tagSlug=nfl'), url);
+    return {
+      events: [
+        { slug: 'nfl-hou-buf-2026-10-12', markets: [{ sportsMarketType: 'football_player_passing_yards', line: 250, subject: { name: 'C.J. Stroud' }, bestAskQuote: { value: '0.6' } }] },
+        { slug: 'nfl-hou-buf-2026-10-12-something-else', markets: [] },
+      ],
+    };
   };
   const r = await fetchMarketQuotes(LEAGUES.nfl, { fetchJson, now: new Date('2026-10-11T12:00:00Z') });
   assert.equal(r.venues.K, false);

@@ -3,7 +3,7 @@
 A cheatsheet-style website showing how often NFL, college football, NBA and WNBA players hit their player props, ranked so the most consistent hitters come first.
 
 - **Top hitters**: every player/prop ranked by hit rate, then sample size, then current streak. Tap a row to see game-by-game bars and to test any line ("hit 58+ rush yds in 9/10").
-- **Best bets** (NFL, NBA, WNBA): every player prop listed on **Kalshi** or **Polymarket**, compared with how often the player has cleared that exact line. The **edge** is the hit rate minus the market's price, ranked from best to worst. College football isn't included because neither site lists CFB player props.
+- **Best bets** (NFL, NBA, WNBA): every player prop listed on **Kalshi** or **Polymarket US**, compared with how often the player has cleared that exact line. The **edge** is the hit rate minus the market's price, ranked from best to worst. College football isn't included because neither site lists CFB player props.
 - **Cheatsheet**: the same results grouped by position in the "Stroud 200+ Pass Yds 4/5 (Missed last)" format, with a Copy button.
 - Filters: sample (last 5/10/15/20 or this season), minimum hit rate, prop type, search, "Playing next" (teams on the upcoming slate), and "Best prop per player".
 
@@ -29,8 +29,8 @@ Preseason games are ignored.
 
 Best Bets prices come from two public APIs that need no key:
 
-- **Kalshi**: `api.elections.kalshi.com/trade-api/v2/markets?series_ticker=…`, using the per-game player series such as `KXNFLPASSYDS` and `KXNBAPTS` (the full list is in `js/config.js`). Each rung reads "Player: 250+", and the price is the YES ask plus Kalshi's taker fee (about 7% × P × (1 − P)).
-- **Polymarket**: `gamma-api.polymarket.com/events?tag_slug=nfl` and similar, using the `…-player-props` events. Each market reads "Player: Passing Yards O/U 249.5", which is treated as 250+, and the price is the Over ask.
+- **Kalshi**: `api.elections.kalshi.com/trade-api/v2/markets?series_ticker=…`, using the per-game player series such as `KXNFLPASSYDS` and `KXNBAPTS` (the full list is in `js/config.js`). Each rung reads "Player: 250+", and the price is the YES ask, plus Kalshi's taker fee (0.07 × P × (1 − P)).
+- **Polymarket US**: `gateway.polymarket.us/v1/events?tagSlug=nfl` and similar. This is the US app's own exchange, whose prices differ from the international polymarket.com book. Each player market has a `sportsMarketType` such as `football_player_passing_yards` and a line N meaning "N+". The price is the YES ask, plus Polymarket US's taker fee (0.0695 × P × (1 − P)).
 
 The hit rate is nudged toward 50% with (hits + 1) / (games + 2), so a 5-for-5 sample doesn't look like a sure thing. The page pulls prices live when it can and otherwise falls back to the `data/<league>-odds.json` file built by the workflow. The endpoints are undocumented, so ESPN can change them without notice.
 

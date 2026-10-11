@@ -1,14 +1,13 @@
-// Player-prop prices from prediction markets (Kalshi + Polymarket). Browser + Node.
+// Player-prop prices from prediction markets (Kalshi + Polymarket US). Browser + Node.
 //
-// Every quote is normalized to our "X+" form: the price (0-1) you'd pay for YES on
-// "player gets at least `line`", which is also the market's implied probability.
+// Every quote is normalized to our "X+" form: `price` is the YES ask (0-1) exactly as the
+// venue shows it; `cost` adds the venue's taker fee and is what Best Bets compares against.
 import { defaultFetchJson } from './espn.js';
 
 const KALSHI = 'https://api.elections.kalshi.com/trade-api/v2';
-const GAMMA = 'https://gamma-api.polymarket.com';
 
-// Kalshi charges a taker fee of about 7% x P x (1 - P) per contract.
-export const kalshiFee = (p) => Math.ceil(0.07 * p * (1 - p) * 100) / 100;
+// Kalshi taker fee: 0.07 x P x (1 - P) per contract (Kalshi rounds the whole order up to a cent).
+export const kalshiFee = (p) => 0.07 * p * (1 - p);
 
 const MONTHS = { JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, AUG: 8, SEP: 9, OCT: 10, NOV: 11, DEC: 12 };
 const usable = (p) => p !== null && p !== undefined && Number.isFinite(p) && p > 0.02 && p < 0.98;
@@ -64,124 +63,144 @@ export function parseKalshiMarket(m, marketId, series) {
   };
 }
 
+async function fetchKalshiSeries(ticker, marketId, { fetchJson, pace }) {
+  const out = [];
+  let cursor = '';
+  for (let page = 0; page < 10; page++) {
+    if (pace) await new Promise((r) => setTimeout(r, pace)); // Kalshi rate-limits bursts
+    const json = await fetchJson(`${KALSHI}/markets?series_ticker=${ticker}&status=open&limit=1000${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+    const markets = json.markets || [];
+    for (const m of markets) {
+      const q = parseKalshiMarket(m, marketId, ticker);
+      if (q) out.push(q);
+    }
+    cursor = json.cursor || '';
+    if (!cursor || !markets.length) break;
+  }
+  return out;
+}
+
+// One series first: if Kalshi can't be reached at all (blocked, offline), skip the rest
+// instead of waiting on every request. Then the rest run in parallel, or one at a time
+// when `pace` is set (the Node builder, which stays under Kalshi's rate limit).
 async function fetchKalshi(cfg, { fetchJson, log, pace }) {
+  const series = Object.entries(cfg.kalshiSeries || {});
+  if (!series.length) return { quotes: [], ok: false };
   const out = [];
   let failed = 0;
-  const series = Object.entries(cfg.kalshiSeries || {});
-  for (const [ticker, marketId] of series) {
-    let cursor = '';
+  const run = async ([ticker, marketId]) => {
     try {
-      for (let page = 0; page < 10; page++) {
-        if (pace) await new Promise((r) => setTimeout(r, pace)); // Kalshi rate-limits bursts
-        const json = await fetchJson(`${KALSHI}/markets?series_ticker=${ticker}&status=open&limit=1000${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
-        const markets = json.markets || [];
-        for (const m of markets) {
-          const q = parseKalshiMarket(m, marketId, ticker);
-          if (q) out.push(q);
-        }
-        cursor = json.cursor || '';
-        if (!cursor || !markets.length) break;
-      }
+      out.push(...(await fetchKalshiSeries(ticker, marketId, { fetchJson, pace })));
+      return true;
     } catch (err) {
       failed++;
       log.push(`kalshi ${ticker}: ${err.message}`);
+      return /HTTP \d/.test(String(err.message)); // an HTTP error means Kalshi answered
     }
-  }
-  return { quotes: out, ok: series.length > 0 && failed < series.length };
+  };
+  const [first, ...rest] = series;
+  if (!(await run(first))) return { quotes: out, ok: false };
+  if (pace) for (const item of rest) await run(item);
+  else await Promise.all(rest.map(run));
+  return { quotes: out, ok: failed < series.length };
 }
 
-// ---------- Polymarket ----------
-// Gamma API events tagged by league; player props live in "<league>-aaa-bbb-YYYY-MM-DD-player-props"
-// events whose markets read "Player Name: Passing Yards O/U 249.5" with Over/Under outcomes.
-const POLY_Q = /^(.*?):\s*(.+?)\s+O\/U\s+([\d.]+)/i;
+// ---------- Polymarket US ----------
+// Polymarket US (polymarket.us, the CFTC-regulated app US players use) runs its own exchange
+// with its own prices, separate from the international polymarket.com book. Its public
+// gateway needs no key and allows browser requests. Player props are "at least N" markets:
+//   event slug "nfl-hou-buf-2026-10-12"
+//   market { sportsMarketType: "football_player_passing_yards", line: 250,
+//            subject: { name: "C.J. Stroud" }, bestAskQuote: { value: "0.64" }, ... }
+const PMUS = 'https://gateway.polymarket.us/v1';
 
-const POLY_STATS = {
+// Stat part of sportsMarketType ("passing_yards" -> "passing yards") -> our market id.
+// Order matters: combos before their parts.
+const PMUS_STATS = {
   football: [
-    [/rush.*\+.*rec|scrimmage yards|rushing \+ receiving/i, 'rushRecYds'],
-    [/passing yards/i, 'passYds'],
-    [/passing touchdowns|pass(ing)? tds/i, 'passTd'],
-    [/completions/i, 'cmp'],
-    [/interceptions/i, 'int'],
-    [/rushing yards/i, 'rushYds'],
-    [/rushing attempts|carries/i, 'rushAtt'],
-    [/receiving yards/i, 'recYds'],
-    [/receptions/i, 'rec'],
+    [/^scrimmage yards$/, 'rushRecYds'],
+    [/^passing yards$/, 'passYds'],
+    [/^passing touchdowns$/, 'passTd'],
+    [/^passing completions$/, 'cmp'],
+    [/^interceptions thrown$/, 'int'],
+    [/^rushing yards$/, 'rushYds'],
+    [/^rushing attempts$/, 'rushAtt'],
+    [/^receiving yards$/, 'recYds'],
+    [/^receptions$/, 'rec'],
+    [/^touchdowns$/, 'anyTd'],
   ],
   basketball: [
-    [/pts\s*\+\s*reb\s*\+\s*ast|points\s*\+\s*rebounds\s*\+\s*assists|\bpra\b/i, 'pra'],
-    [/pts\s*\+\s*reb|points\s*\+\s*rebounds/i, 'pr'],
-    [/pts\s*\+\s*ast|points\s*\+\s*assists/i, 'pa'],
-    [/reb\s*\+\s*ast|rebounds\s*\+\s*assists/i, 'ra'],
-    [/three|3-?point|3pm|threes/i, 'tpm'],
-    [/rebounds?/i, 'reb'],
-    [/assists?/i, 'ast'],
-    [/steals?/i, 'stl'],
-    [/blocks?/i, 'blk'],
-    [/points?/i, 'pts'],
+    [/points.*rebounds.*assists/, 'pra'],
+    [/points.*rebounds/, 'pr'],
+    [/points.*assists/, 'pa'],
+    [/rebounds.*assists/, 'ra'],
+    [/three|3pt|threes/, 'tpm'],
+    [/^rebounds$/, 'reb'],
+    [/^assists$/, 'ast'],
+    [/^steals$/, 'stl'],
+    [/^blocks$/, 'blk'],
+    [/^points$/, 'pts'],
   ],
 };
+const PMUS_TITLE = /^(.*?)\s+(\d+)\+\s/;
 
-const asArray = (v) => {
-  if (Array.isArray(v)) return v;
-  if (typeof v === 'string') {
-    try {
-      const parsed = JSON.parse(v);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-};
+// Polymarket US taker fee (in effect since 2026-10-07): 0.0695 x P x (1 - P) per contract.
+export const polyFee = (p) => 0.0695 * p * (1 - p);
 
-export function parsePolyMarket(m, kind, slug, date) {
-  const q = POLY_Q.exec(m.question || m.groupItemTitle || '');
-  if (!q || /\bvs\.?\b/i.test(q[1])) return null;
-  const hit = (POLY_STATS[kind] || []).find(([rx]) => rx.test(q[2]));
+export function parsePolyUsMarket(m, kind, eventSlug, date) {
+  const type = String(m.sportsMarketType || '');
+  const at = type.indexOf('_player_');
+  if (at < 0) return null;
+  if (m.closed || m.active === false) return null;
+  if (m.status && m.status !== 'MARKET_STATUS_OPEN') return null;
+  const statText = type.slice(at + 8).replace(/_/g, ' ');
+  const hit = (PMUS_STATS[kind] || []).find(([rx]) => rx.test(statText));
   if (!hit) return null;
-  const ou = num(m.line) ?? Number(q[3]);
-  const outcomes = asArray(m.outcomes);
-  const prices = asArray(m.outcomePrices);
-  const overIdx = outcomes.findIndex((o) => /over|yes/i.test(String(o)));
-  let ask = num(m.bestAsk);
-  // bestBid/bestAsk describe the first outcome; flip when Over is listed second.
-  if (overIdx === 1 && num(m.bestBid) !== null) ask = 1 - num(m.bestBid);
-  if (!usable(ask) && overIdx >= 0) ask = num(prices[overIdx]);
+  const titled = PMUS_TITLE.exec(m.title || '');
+  const name = (m.subject && m.subject.name) || (m.metadata && m.metadata.playerName) || (titled && titled[1]);
+  const n = num(m.line) ?? (titled ? Number(titled[2]) : null);
+  if (!name || n === null) return null;
+  const quote = (q) => (q && typeof q === 'object' ? num(q.value) : num(q));
+  const ask = quote(m.bestAskQuote);
+  const bid = quote(m.bestBidQuote);
   if (!usable(ask)) return null;
+  if (bid !== null && ask - bid > 0.15) return null;
   return {
     v: 'P',
-    name: q[1].trim(),
+    name: String(name).trim(),
     m: hit[1],
-    line: Math.floor(ou) + 1, // over 249.5 = 250+
+    line: Math.ceil(n), // "250+" (a line given as 249.5 also means 250+)
     price: ask,
-    cost: ask,
+    cost: Math.min(0.99, ask + polyFee(ask)),
     date,
-    url: `https://polymarket.com/event/${slug}`,
+    url: `https://polymarket.us/event/${eventSlug}`,
   };
 }
 
 async function fetchPolymarket(cfg, { fetchJson, log, now }) {
   if (!cfg.polyTag) return { quotes: [], ok: false };
   const out = [];
+  const day = (offset) => new Date(now.getTime() + offset * 86400000).toISOString().slice(0, 10);
+  const slugRx = new RegExp(`^${cfg.polyTag}-([a-z]+)-([a-z]+)-(\\d{4}-\\d{2}-\\d{2})$`);
   try {
-    const events = await fetchJson(`${GAMMA}/events?closed=false&tag_slug=${cfg.polyTag}&limit=500&order=startDate&ascending=false`);
-    const lo = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
-    const hi = new Date(now.getTime() + 9 * 86400000).toISOString().slice(0, 10);
-    const props = (Array.isArray(events) ? events : events.events || []).filter((e) => /-player-props$/.test(e.slug || ''));
-    for (const ev of props) {
-      const date = (/(\d{4}-\d{2}-\d{2})-player-props$/.exec(ev.slug) || [])[1] || String(ev.startDate || '').slice(0, 10);
-      if (date && (date < lo || date > hi)) continue;
-      let markets = ev.markets || [];
-      if (!markets.length) {
+    const list = await fetchJson(
+      `${PMUS}/events?tagSlug=${cfg.polyTag}&active=true&closed=false&startDateMin=${day(-1)}T00:00:00Z&startDateMax=${day(9)}T00:00:00Z&limit=100`,
+    );
+    const events = ((list && list.events) || (Array.isArray(list) ? list : [])).filter((e) => slugRx.test(e.slug || ''));
+    for (const ev of events) {
+      const date = slugRx.exec(ev.slug)[3];
+      let markets = ev.markets;
+      if (!Array.isArray(markets) || !markets.length) {
         try {
-          markets = (await fetchJson(`${GAMMA}/events/slug/${encodeURIComponent(ev.slug)}`)).markets || [];
+          const full = await fetchJson(`${PMUS}/events/slug/${encodeURIComponent(ev.slug)}`);
+          markets = ((full && full.event) || full || {}).markets || [];
         } catch (err) {
           log.push(`polymarket ${ev.slug}: ${err.message}`);
+          markets = [];
         }
       }
       for (const m of markets) {
-        if (m.closed || m.active === false) continue;
-        const q = parsePolyMarket(m, cfg.kind, ev.slug, date);
+        const q = parsePolyUsMarket(m, cfg.kind, ev.slug, date);
         if (q) out.push(q);
       }
     }
@@ -193,8 +212,10 @@ async function fetchPolymarket(cfg, { fetchJson, log, now }) {
 }
 
 /** All prediction-market quotes for a league. Never throws; check `ok` per venue. */
-export async function fetchMarketQuotes(cfg, { fetchJson = defaultFetchJson, now = new Date(), pace = 0 } = {}) {
+export async function fetchMarketQuotes(cfg, { fetchJson: baseFetch = defaultFetchJson, now = new Date(), pace = 0 } = {}) {
   const log = [];
+  // Prices go stale fast; fail quickly rather than retrying.
+  const fetchJson = (url) => baseFetch(url, { timeoutMs: 10000, retries: 0 });
   const [k, p] = await Promise.all([
     fetchKalshi(cfg, { fetchJson, log, pace }),
     fetchPolymarket(cfg, { fetchJson, log, now }),
