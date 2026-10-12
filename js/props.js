@@ -171,11 +171,12 @@ export function defenseVsPosition(players, cfg, minGames = 3) {
         const v = m.value(g) ?? 0;
         const byGroup = (teams[g.o] = teams[g.o] || {});
         const byStat = (byGroup[group] = byGroup[group] || {});
-        const a = (byStat[id] = byStat[id] || { n: 0, sum: 0, overs: 0, diff: 0 });
+        const a = (byStat[id] = byStat[id] || { n: 0, sum: 0, overs: 0, diff: 0, games: [] });
         a.n++;
         a.sum += v;
         if (v > usual) a.overs++;
         a.diff += (v - usual) / usual;
+        a.games.push({ name: p.name, team: g.tm || p.team, d: g.d, v, usual });
       }
     }
   }
@@ -188,6 +189,7 @@ export function defenseVsPosition(players, cfg, minGames = 3) {
         if (!a) continue;
         a.avg = a.sum / a.n;
         a.pct = a.diff / a.n;
+        a.games.sort((x, y) => String(y.d).localeCompare(String(x.d)));
         if (a.n >= minGames) ranked.push(a);
       }
       ranked.sort((x, y) => x.pct - y.pct);

@@ -597,14 +597,28 @@ function matchupSide(d, teams, dvp, off, def) {
     })
     .join('');
 
+  // One expandable block per position/stat: the summary line, then every game behind it.
   const posRows = [];
   for (const [group, ids] of Object.entries(cfg.dvp)) {
     for (const id of ids) {
       const a = ((dvp.teams[def] || {})[group] || {})[id];
       if (!a) continue;
-      posRows.push(
-        `<tr><td>${esc(group)} · ${esc(marketLabel(id))}</td><td class="num">${fmt(a.avg)}</td><td class="num">${a.overs}/${a.n}</td><td class="num ${a.pct >= 0 ? 'up' : 'down'}">${signedPct(a.pct)}</td><td>${rankPill(a.rank, a.of)}</td></tr>`,
-      );
+      const games = a.games
+        .map(
+          (x) =>
+            `<li><span class="when">${esc(x.d.slice(5).replace('-', '/'))}</span><span class="who">${esc(x.name)} <span class="muted">${esc(x.team)}</span></span><span class="num">${fmt(x.v)}</span><span class="num muted">usual ${fmt(x.usual)}</span><span class="${x.v > x.usual ? 'up' : 'down'}">${x.v > x.usual ? '✓ over' : '✗ under'}</span></li>`,
+        )
+        .join('');
+      posRows.push(`<details class="dvp">
+        <summary>
+          <span class="lbl">${esc(group)} · ${esc(marketLabel(id))}</span>
+          <span class="num">${fmt(a.avg)}/g</span>
+          <span class="num">${a.overs}/${a.n} over</span>
+          <span class="num ${a.pct >= 0 ? 'up' : 'down'}">${signedPct(a.pct)}</span>
+          ${rankPill(a.rank, a.of)}
+        </summary>
+        <ul class="dvp-games">${games}</ul>
+      </details>`);
     }
   }
 
@@ -639,12 +653,11 @@ function matchupSide(d, teams, dvp, off, def) {
       <thead><tr><th>Defense</th><th class="num">Per game</th><th>Rank of ${Object.values(teams).filter((x) => x.n).length}</th></tr></thead>
       <tbody>${defRows}</tbody>
     </table></div>
+    <h4>How opponents did vs ${esc(def)} this season</h4>
     ${
       posRows.length
-        ? `<div class="tscroll"><table class="mtable">
-      <thead><tr><th>Vs position</th><th class="num">Avg</th><th class="num">Beat usual</th><th class="num">Vs usual</th><th>Rank</th></tr></thead>
-      <tbody>${posRows.join('')}</tbody>
-    </table></div>`
+        ? `<p class="explain">Every tracked player who faced ${esc(def)} this season: average, how many went over their usual number, and by how much. Tap a row to see each game.</p>
+      <div class="dvp-list">${posRows.join('')}</div>`
         : `<p class="explain">No tracked players have faced ${esc(def)} yet this season.</p>`
     }
     ${watchHtml ? `<h4>${esc(off)} players to watch</h4><ul class="watch">${watchHtml}</ul>` : ''}

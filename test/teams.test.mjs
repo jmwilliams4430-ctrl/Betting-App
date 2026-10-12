@@ -90,6 +90,10 @@ test('defenseVsPosition: share of players who beat their usual against each defe
   assert.ok(hou.pct > 0.4);
   assert.equal(hou.of, 4);
   assert.equal(hou.rank, 4); // softest of the four ranked defenses
+  assert.deepEqual(
+    hou.games.map((x) => [x.name, x.v, x.usual]),
+    [['A', 110, 70], ['A', 95, 70], ['B', 80, 50]],
+  );
   const dal = r.teams.DAL.RBs.rushYds;
   assert.equal(dal.overs, 0);
   assert.equal(dal.rank, 1);

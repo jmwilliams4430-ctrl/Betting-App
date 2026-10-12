@@ -175,6 +175,27 @@ button, select, input { font: inherit; color: inherit; }
 .alldef summary { cursor: pointer; font-weight: 600; }
 .alldef .mtable { margin-top: 8px; }
 
+.dvp-list { display: grid; gap: 4px; }
+.dvp { border-bottom: 1px solid var(--line); }
+.dvp summary {
+  list-style: none;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 1fr auto auto auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 0;
+  font-size: 13.5px;
+}
+.dvp summary::-webkit-details-marker { display: none; }
+.dvp summary .lbl::before { content: "▸ "; color: var(--muted); }
+.dvp[open] summary .lbl::before { content: "▾ "; }
+.dvp .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dvp-games { list-style: none; margin: 0 0 8px; padding: 0 0 0 14px; display: grid; gap: 3px; font-size: 13px; }
+.dvp-games li { display: grid; grid-template-columns: 40px 1fr auto auto 58px; gap: 8px; align-items: baseline; }
+.dvp-games .when, .dvp-games .muted { color: var(--muted); }
+.dvp-games .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* Expanded detail */
 .detail { border-top: 1px solid var(--line); padding: 12px; background: var(--panel-2); }
 .detail h4 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
@@ -228,5 +249,7 @@ button, select, input { font: inherit; color: inherit; }
   .seg button { flex: 1; padding: 7px 4px; font-size: 13.5px; white-space: nowrap; }
   .mtable { font-size: 12.5px; }
   .mtable td, .mtable th { padding-right: 6px; }
+  .dvp summary { font-size: 12.5px; gap: 6px; }
+  .dvp-games li { grid-template-columns: 34px 1fr auto auto 50px; gap: 6px; font-size: 12px; }
   .brand .sub { margin-bottom: 10px; }
 }
