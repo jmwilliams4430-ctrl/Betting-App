@@ -4,6 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { LEAGUES, LEAGUE_KEYS } from '../js/config.js';
 import { buildLeagueData } from '../js/espn.js';
 import { fetchMarketQuotes } from '../js/odds.js';
+import { buildTeamData } from '../js/teams.js';
 
 const keys = process.argv.slice(2).length ? process.argv.slice(2) : LEAGUE_KEYS;
 const outDir = new URL('../data/', import.meta.url);
@@ -37,6 +38,19 @@ for (const key of keys) {
     console.log(`  markets: Kalshi ${odds.venues.K ? by('K') : 'unavailable'}, Polymarket ${odds.venues.P ? by('P') : 'unavailable'}`);
     for (const line of odds.log.slice(0, 8)) console.log(`  ! ${line}`);
     await writeFile(new URL(`${key}-odds.json`, outDir), JSON.stringify(odds));
+  }
+
+  // Team defense for the Matchups tab.
+  if (cfg.teamStats) {
+    try {
+      const teams = await buildTeamData(cfg, { concurrency: 8 });
+      const played = Object.values(teams.teams).filter((t) => t.n).length;
+      console.log(`  defense: ${played} teams with games (${teams.seasonNote})`);
+      for (const line of teams.log.slice(0, 5)) console.log(`  ! ${line}`);
+      if (played) await writeFile(new URL(`${key}-teams.json`, outDir), JSON.stringify(teams));
+    } catch (err) {
+      console.error(`  defense: failed (${err.message})`);
+    }
   }
 }
 if (failures === keys.length) process.exitCode = 1;

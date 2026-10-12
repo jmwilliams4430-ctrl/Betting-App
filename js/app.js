@@ -1,12 +1,14 @@
 import { LEAGUES, LEAGUE_KEYS, LINE_FLOORS, DEFAULT_FLOOR } from './config.js';
 import { buildLeagueData } from './espn.js';
 import { fetchMarketQuotes, nameKey } from './odds.js';
-import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, formatNote, bestBets, americanOdds } from './props.js';
+import { buildTeamData } from './teams.js';
+import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, formatNote, bestBets, americanOdds, defenseVsPosition, median } from './props.js';
 
 const STATIC_MAX_AGE = 36 * 3600e3; // pre-built data/*.json older than this triggers a live pull
 const CACHE_MAX_AGE = 3 * 3600e3;
 const ODDS_MAX_AGE = 12 * 3600e3; // pre-built market prices older than this are ignored
 const ODDS_REFRESH = 5 * 60e3; // re-pull live prices after this long
+const TEAMS_CACHE_AGE = 6 * 3600e3;
 const VENUES = { K: 'Kalshi', P: 'Polymarket US' };
 const HEADSHOT_PATH = { nfl: 'nfl', cfb: 'college-football', nba: 'nba', wnba: 'wnba' };
 
@@ -44,6 +46,7 @@ const state = {
   ...store.get('prefs', {}),
   data: {}, // league -> dataset
   odds: {}, // league -> { quotes, venues, generatedAt, log, fetchedAt }
+  teams: {}, // league -> { data, error, loading, progress }
   expanded: null, // "playerId:marketId"
   custom: {}, // "playerId:marketId" -> custom line
   loading: false,
@@ -145,6 +148,51 @@ async function ensureOdds(force = false) {
   if (key === state.league && state.view === 'bets') render();
 }
 
+const hasMatchups = (key) => Boolean(LEAGUES[key].teamStats);
+
+// Team defense: browser cache, then the pre-built file, then a live pull of box scores.
+async function ensureTeams(force = false) {
+  const key = state.league;
+  if (!hasMatchups(key)) return;
+  const cur = state.teams[key];
+  if (cur && (cur.loading || (!force && cur.data))) return;
+  state.teams[key] = { loading: true, data: cur && cur.data };
+  if (state.view === 'matchups') render();
+  let data = null;
+  let error = null;
+  if (!force) {
+    const cached = store.get(`teams:${key}`, null);
+    if (cached && age(cached) < TEAMS_CACHE_AGE) data = cached;
+  }
+  if (!data && !force) {
+    const stat = await fetchStatic(`${key}-teams`);
+    if (stat && age(stat) < STATIC_MAX_AGE && Object.values(stat.teams || {}).some((t) => t.n)) data = stat;
+  }
+  if (!data) {
+    try {
+      data = await buildTeamData(LEAGUES[key], {
+        onProgress: (p) => key === state.league && state.view === 'matchups' && showTeamProgress(p),
+      });
+      if (Object.values(data.teams).some((t) => t.n)) store.set(`teams:${key}`, data);
+      else error = new Error(data.log[0] || 'no finished games found');
+    } catch (err) {
+      error = err;
+    }
+  }
+  state.teams[key] = { data: data || (cur && cur.data) || null, error, loading: false };
+  if (key === state.league && state.view === 'matchups') render();
+}
+
+function showTeamProgress(p) {
+  const el = $('status');
+  el.className = 'status';
+  if (p.phase === 'teams') el.innerHTML = 'Loading team schedules…';
+  else {
+    const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
+    el.innerHTML = `Reading box scores ${p.done}/${p.total}<div class="bar"><i style="width:${pct}%"></i></div>`;
+  }
+}
+
 // ---------- helpers ----------
 
 function nextGame(d, p) {
@@ -216,13 +264,20 @@ function renderChrome() {
     (k) => `<button data-league="${k}" aria-pressed="${k === state.league}">${LEAGUES[k].label}</button>`,
   ).join('');
   if (state.view === 'bets' && !hasMarkets(state.league)) state.view = 'top';
+  if (state.view === 'matchups' && !hasMatchups(state.league)) state.view = 'top';
   for (const b of $('view').querySelectorAll('button')) {
     b.setAttribute('aria-selected', String(b.dataset.v === state.view));
     if (b.dataset.v === 'bets') b.hidden = !hasMarkets(state.league);
+    if (b.dataset.v === 'matchups') b.hidden = !hasMatchups(state.league);
   }
-  // Best Bets uses each market's own line, so the line pickers don't apply there.
-  for (const id of ['minRate', 'floor']) $(id).closest('.field').hidden = state.view === 'bets';
-  $('upcoming').closest('.chk').hidden = state.view === 'bets';
+  // Best Bets uses each market's own line, so the line pickers don't apply there;
+  // Matchups is season-to-date team data, so none of the prop filters do.
+  const mu = state.view === 'matchups';
+  for (const id of ['minRate', 'floor']) $(id).closest('.field').hidden = state.view === 'bets' || mu;
+  $('window').closest('.field').hidden = mu;
+  $('upcoming').closest('.chk').hidden = state.view === 'bets' || mu;
+  $('onePer').closest('.chk').hidden = mu;
+  $('markets').hidden = mu;
   $('window').value = state.window;
   $('minRate').value = state.minRate;
   $('floor').value = state.floor;
@@ -243,6 +298,7 @@ function render() {
 
   const status = $('status');
   status.className = 'status';
+  if (state.view === 'matchups' && !(d.error && !(d.players || []).length)) return renderMatchupsView(d);
   const { rows, hasSchedule } = filteredRows(d);
 
   const bits = [];
@@ -430,6 +486,194 @@ function renderBets(rows, d) {
     <ul class="list">${items.join('')}</ul>`;
 }
 
+// ---------- Matchups ----------
+
+function upcomingGames(schedule) {
+  const seen = new Set();
+  const games = [];
+  for (const [team, g] of Object.entries(schedule || {})) {
+    if (team.startsWith('id:') || g.h !== '@') continue;
+    const key = `${team}@${g.opp}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    games.push({ away: team, home: g.opp, t: g.t, live: g.live });
+  }
+  return games.sort((a, b) => String(a.t).localeCompare(String(b.t)));
+}
+
+let dvpMemo = { data: null, result: null };
+function dvpFor(d) {
+  if (dvpMemo.data !== d) dvpMemo = { data: d, result: defenseVsPosition(d.players || [], LEAGUES[state.league]) };
+  return dvpMemo.result;
+}
+
+const signedPct = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(Math.round(x * 100))}%`;
+
+// Rank pill from an over bettor's view: top quarter = tough defense, bottom quarter = soft.
+function rankPill(rank, of) {
+  if (!rank || !of) return '<span class="pill">–</span>';
+  const cls = rank <= Math.ceil(of / 4) ? 'tough' : rank > of - Math.ceil(of / 4) ? 'soft' : '';
+  return `<span class="pill ${cls}" title="#${rank} toughest of ${of}">#${rank}</span>`;
+}
+
+function marketLabel(id) {
+  const m = LEAGUES[state.league].markets.find((x) => x.id === id);
+  return m ? m.label : id;
+}
+
+// The friendliest spots for offenses against this defense, for the collapsed card.
+function softSpots(dvp, def) {
+  const out = [];
+  for (const [group, stats] of Object.entries((dvp.teams[def] || {}))) {
+    for (const [id, a] of Object.entries(stats)) if (a.rank && a.pct > 0.08) out.push({ group, id, a });
+  }
+  return out.sort((x, y) => y.a.pct - x.a.pct).slice(0, 2);
+}
+
+function renderMatchupsView(d) {
+  const cfg = LEAGUES[state.league];
+  const t = state.teams[state.league];
+  const status = $('status');
+  $('updated').textContent = d.generatedAt ? `Updated ${new Date(d.generatedAt).toLocaleString()}` : '';
+  const log = [...(d.log || []), ...((t && t.data && t.data.log) || [])];
+  $('diag').hidden = !log.length;
+  $('diagText').textContent = log.join('\n');
+
+  if (!t || (t.loading && !t.data)) {
+    status.innerHTML = 'Loading team defense…';
+    $('results').innerHTML = '';
+    return;
+  }
+  const teams = (t.data && t.data.teams) || {};
+  const dvp = dvpFor(d);
+  const q = state.search.trim().toLowerCase();
+  const nameOf = (abbr) => (teams[abbr] && teams[abbr].name) || abbr;
+  let games = upcomingGames(d.schedule);
+  if (q) games = games.filter((g) => `${g.away} ${g.home} ${nameOf(g.away)} ${nameOf(g.home)}`.toLowerCase().includes(q));
+
+  const bits = [];
+  if (t.error && !t.data) {
+    status.className = 'status err';
+    bits.push(`Couldn't load team defense (${esc(t.error.message || t.error)}).`);
+  } else {
+    bits.push(`<b>${games.length}</b> upcoming game${games.length === 1 ? '' : 's'}`);
+    if (t.data) bits.push(`team defense from ${esc(t.data.seasonNote || 'this season')}`);
+    if (dvp.season) bits.push(`positions vs defense from ${dvp.season} games of tracked players`);
+  }
+  status.innerHTML = bits.join(' · ');
+
+  const cards = games.map((g) => {
+    const key = `g:${g.away}@${g.home}`;
+    const open = state.expanded === key;
+    const when = g.t ? new Date(g.t).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+    const spots = [
+      ...softSpots(dvp, g.home).map((x) => `${esc(g.away)} ${esc(x.group)}: ${esc(marketLabel(x.id))} ${signedPct(x.a.pct)} vs ${esc(g.home)}`),
+      ...softSpots(dvp, g.away).map((x) => `${esc(g.home)} ${esc(x.group)}: ${esc(marketLabel(x.id))} ${signedPct(x.a.pct)} vs ${esc(g.away)}`),
+    ];
+    return `<li class="row">
+      <button class="mu-head" data-expand="${esc(key)}" aria-expanded="${open}">
+        <span class="mu-teams">${esc(g.away)} <span class="at">@</span> ${esc(g.home)}</span>
+        <span class="mu-when">${g.live ? 'LIVE' : esc(when)}</span>
+        <span class="mu-spots">${spots.length ? spots.map((x) => `<span>${x}</span>`).join('') : '<span class="none">Tap for defense and position stats</span>'}</span>
+      </button>
+      ${open ? `<div class="detail">${matchupSide(d, teams, dvp, g.away, g.home)}${matchupSide(d, teams, dvp, g.home, g.away)}</div>` : ''}
+    </li>`;
+  });
+
+  const table = renderDefenseTable(teams, cfg);
+  $('results').innerHTML = `<p class="explain">For each game: the defense's averages and league ranks (#1 = toughest, green = soft spot for overs), then how each position has done against that defense compared with each player's usual number (his median over his recent games).</p>
+    ${games.length ? `<ul class="list">${cards.join('')}</ul>` : '<div class="empty">No upcoming games on the schedule right now.</div>'}
+    ${table}`;
+}
+
+function matchupSide(d, teams, dvp, off, def) {
+  const cfg = LEAGUES[state.league];
+  const dt = teams[def];
+  const defRows = cfg.teamStats
+    .map((s) => {
+      const v = dt && dt.stats[s.id];
+      const of = Object.values(teams).filter((x) => x.ranks[s.id]).length;
+      return `<tr><td>${esc(s.label)}</td><td class="num">${Number.isFinite(v) ? fmt(v) : '–'}</td><td>${rankPill(dt && dt.ranks[s.id], of)}</td></tr>`;
+    })
+    .join('');
+
+  const posRows = [];
+  for (const [group, ids] of Object.entries(cfg.dvp)) {
+    for (const id of ids) {
+      const a = ((dvp.teams[def] || {})[group] || {})[id];
+      if (!a) continue;
+      posRows.push(
+        `<tr><td>${esc(group)} · ${esc(marketLabel(id))}</td><td class="num">${fmt(a.avg)}</td><td class="num">${a.overs}/${a.n}</td><td class="num ${a.pct >= 0 ? 'up' : 'down'}">${signedPct(a.pct)}</td><td>${rankPill(a.rank, a.of)}</td></tr>`,
+      );
+    }
+  }
+
+  // Offense players we track, with how their position has done against this defense.
+  const markets = new Map(cfg.markets.map((m) => [m.id, m]));
+  const watch = [];
+  for (const p of d.players || []) {
+    if (p.team !== off) continue;
+    const g = cfg.positionGroups.find((x) => x.match.includes(String(p.pos || '').toUpperCase()));
+    const ids = g && cfg.dvp[g.label];
+    if (!ids) continue;
+    const id = ids[0];
+    const usual = median(p.games.map((x) => markets.get(id).value(x) ?? 0));
+    if (!(usual > 0)) continue;
+    const a = ((dvp.teams[def] || {})[g.label] || {})[id];
+    watch.push({ p, id, usual, a, group: g.label });
+  }
+  watch.sort((x, y) => (y.a ? y.a.pct : -9) - (x.a ? x.a.pct : -9));
+  const watchHtml = watch
+    .slice(0, 8)
+    .map(
+      (w) =>
+        `<li><b>${esc(w.p.name)}</b> <span class="muted">${esc(w.p.pos)}</span> · usual ${fmt(w.usual)} ${esc(marketLabel(w.id))}${
+          w.a ? ` · <span class="${w.a.pct >= 0 ? 'up' : 'down'}">${esc(w.group)} vs ${esc(def)} ${signedPct(w.a.pct)}</span>` : ''
+        }</li>`,
+    )
+    .join('');
+
+  return `<section class="mu-side">
+    <h4>${esc(off)} offense vs ${esc((dt && dt.name) || def)} defense</h4>
+    <div class="tscroll"><table class="mtable">
+      <thead><tr><th>Defense</th><th class="num">Per game</th><th>Rank of ${Object.values(teams).filter((x) => x.n).length}</th></tr></thead>
+      <tbody>${defRows}</tbody>
+    </table></div>
+    ${
+      posRows.length
+        ? `<div class="tscroll"><table class="mtable">
+      <thead><tr><th>Vs position</th><th class="num">Avg</th><th class="num">Beat usual</th><th class="num">Vs usual</th><th>Rank</th></tr></thead>
+      <tbody>${posRows.join('')}</tbody>
+    </table></div>`
+        : `<p class="explain">No tracked players have faced ${esc(def)} yet this season.</p>`
+    }
+    ${watchHtml ? `<h4>${esc(off)} players to watch</h4><ul class="watch">${watchHtml}</ul>` : ''}
+  </section>`;
+}
+
+function renderDefenseTable(teams, cfg) {
+  const list = Object.values(teams).filter((t) => t.n);
+  if (!list.length) return '';
+  const first = cfg.teamStats[0].id;
+  list.sort((a, b) => (a.ranks[first] || 99) - (b.ranks[first] || 99));
+  const head = cfg.teamStats.map((s) => `<th class="num">${esc(s.label.replace(' allowed', ''))}</th>`).join('');
+  const rows = list
+    .map(
+      (t) =>
+        `<tr><td><b>${esc(t.abbr)}</b></td>${cfg.teamStats
+          .map((s) => {
+            const r = t.ranks[s.id];
+            const cls = r && r <= Math.ceil(list.length / 4) ? 'tough' : r && r > list.length - Math.ceil(list.length / 4) ? 'soft' : '';
+            return `<td class="num ${cls}">${Number.isFinite(t.stats[s.id]) ? fmt(t.stats[s.id]) : '–'}</td>`;
+          })
+          .join('')}</tr>`,
+    )
+    .join('');
+  return `<details class="alldef"><summary>All team defenses (per game allowed)</summary>
+    <div class="tscroll"><table class="mtable"><thead><tr><th>Team</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>
+  </details>`;
+}
+
 function renderSheet(rows, d) {
   const cfg = LEAGUES[state.league];
   const names = shortNames(rows.map((r) => r.player));
@@ -472,6 +716,7 @@ $('leagues').addEventListener('click', (e) => {
   savePrefs();
   ensureData();
   ensureOdds();
+  if (state.view === 'matchups') ensureTeams();
 });
 
 $('view').addEventListener('click', (e) => {
@@ -482,6 +727,7 @@ $('view').addEventListener('click', (e) => {
   savePrefs();
   render();
   if (state.view === 'bets') ensureOdds();
+  if (state.view === 'matchups') ensureTeams();
 });
 
 $('markets').addEventListener('click', (e) => {
@@ -544,6 +790,7 @@ $('results').addEventListener('click', async (e) => {
 $('refresh').addEventListener('click', () => {
   ensureData(true);
   if (state.view === 'bets') ensureOdds(true);
+  if (state.view === 'matchups') ensureTeams(true);
 });
 
 $('floor').innerHTML = LINE_FLOORS.map((f) => `<option value="${f.value}">${esc(f.label)}</option>`).join('');
@@ -551,3 +798,4 @@ if (!LINE_FLOORS.some((f) => String(f.value) === state.floor)) state.floor = Str
 renderChrome();
 ensureData();
 if (state.view === 'bets') ensureOdds();
+if (state.view === 'matchups') ensureTeams();

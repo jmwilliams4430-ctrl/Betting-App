@@ -138,3 +138,64 @@ export function bestBets(players, markets, quotes, nameKey, opts = DEFAULT_OPTS)
   }
   return rows.sort((a, b) => b.edge - a.edge || b.rate - a.rate);
 }
+
+// ---------- Matchups: how each position group has done against each defense ----------
+
+/**
+ * For every defense, every position group and every stat in cfg.dvp: games our tracked
+ * players had against that defense this season, their average, how many beat the player's
+ * usual (his median over all his logged games) and by how much on average.
+ * rank 1 = toughest defense for that group/stat (players fell furthest below their usual).
+ */
+export function defenseVsPosition(players, cfg, minGames = 3) {
+  const markets = new Map(cfg.markets.map((m) => [m.id, m]));
+  const groupOf = (pos) => {
+    const g = cfg.positionGroups.find((x) => x.match.includes(String(pos || '').toUpperCase()));
+    return g ? g.label : null;
+  };
+  let season = -Infinity;
+  for (const p of players) if (p.games.length && p.games[0].s > season) season = p.games[0].s;
+
+  const teams = {};
+  for (const p of players) {
+    const group = groupOf(p.pos);
+    const ids = (cfg.dvp || {})[group];
+    if (!ids) continue;
+    for (const id of ids) {
+      const m = markets.get(id);
+      if (!m) continue;
+      const usual = median(p.games.map((g) => m.value(g) ?? 0));
+      if (!(usual > 0)) continue;
+      for (const g of p.games) {
+        if (g.s !== season || !g.o) continue;
+        const v = m.value(g) ?? 0;
+        const byGroup = (teams[g.o] = teams[g.o] || {});
+        const byStat = (byGroup[group] = byGroup[group] || {});
+        const a = (byStat[id] = byStat[id] || { n: 0, sum: 0, overs: 0, diff: 0 });
+        a.n++;
+        a.sum += v;
+        if (v > usual) a.overs++;
+        a.diff += (v - usual) / usual;
+      }
+    }
+  }
+
+  for (const [group, ids] of Object.entries(cfg.dvp || {})) {
+    for (const id of ids) {
+      const ranked = [];
+      for (const t of Object.values(teams)) {
+        const a = t[group] && t[group][id];
+        if (!a) continue;
+        a.avg = a.sum / a.n;
+        a.pct = a.diff / a.n;
+        if (a.n >= minGames) ranked.push(a);
+      }
+      ranked.sort((x, y) => x.pct - y.pct);
+      ranked.forEach((a, i) => {
+        a.rank = i + 1;
+        a.of = ranked.length;
+      });
+    }
+  }
+  return { season: Number.isFinite(season) ? season : null, teams };
+}

@@ -89,6 +89,26 @@ const FOOTBALL_DISCOVERY = (limits) => [
   { category: 'offense:receiving', sort: 'receiving.receivingYards:desc', limit: limits.receiving },
 ];
 
+// Matchups tab: team defense from box scores ("allowed" = what opponents' offenses put up).
+const FOOTBALL_TEAM_STATS = [
+  { id: 'pts', label: 'Points allowed', from: 'score' },
+  { id: 'yds', label: 'Yards allowed', names: ['totalYards'] },
+  { id: 'passYds', label: 'Pass yds allowed', names: ['netPassingYards'] },
+  { id: 'rushYds', label: 'Rush yds allowed', names: ['rushingYards'] },
+  { id: 'sacks', label: 'Sacks', names: ['sacksYardsLost'], higherIsTougher: true },
+  { id: 'takeaways', label: 'Takeaways', names: ['turnovers'], higherIsTougher: true },
+];
+const BASKETBALL_TEAM_STATS = [
+  { id: 'pts', label: 'Points allowed', from: 'score' },
+  { id: 'reb', label: 'Rebounds allowed', names: ['totalRebounds', 'rebounds'] },
+  { id: 'ast', label: 'Assists allowed', names: ['assists'] },
+  { id: 'tpm', label: '3PM allowed', names: ['threePointFieldGoalsMade-threePointFieldGoalsAttempted', 'threePointFieldGoalsMade'] },
+  { id: 'fgPct', label: 'Opp FG%', names: ['fieldGoalPct'] },
+];
+// How each position group has done against a defense, by our prop markets.
+const FOOTBALL_DVP = { QBs: ['passYds', 'rushYds'], RBs: ['rushYds', 'rec'], WRs: ['recYds', 'rec'], TEs: ['recYds', 'rec'] };
+const BASKETBALL_DVP = { Guards: ['pts', 'ast', 'tpm'], Forwards: ['pts', 'reb'], Centers: ['pts', 'reb'] };
+
 export const LEAGUES = {
   nfl: {
     key: 'nfl',
@@ -102,6 +122,9 @@ export const LEAGUES = {
       KXNFLRRYDS: 'rushRecYds', KXNFLTD: 'anyTd',
     },
     polyTag: 'nfl',
+    teamStats: FOOTBALL_TEAM_STATS,
+    teamGames: 17,
+    dvp: FOOTBALL_DVP,
     kind: 'football',
     stats: FOOTBALL_STATS,
     markets: FOOTBALL_MARKETS,
@@ -141,6 +164,9 @@ export const LEAGUES = {
       KXNBABLK: 'blk', KXNBAPRA: 'pra', KXNBAPR: 'pr', KXNBAPA: 'pa', KXNBARA: 'ra',
     },
     polyTag: 'nba',
+    teamStats: BASKETBALL_TEAM_STATS,
+    teamGames: 10,
+    dvp: BASKETBALL_DVP,
     kind: 'basketball',
     stats: BASKETBALL_STATS,
     markets: BASKETBALL_MARKETS,
@@ -164,6 +190,9 @@ export const LEAGUES = {
     // WNBA series names follow Kalshi's NBA pattern; unlisted ones are skipped quietly.
     kalshiSeries: { KXWNBAPTS: 'pts', KXWNBAREB: 'reb', KXWNBAAST: 'ast', KXWNBA3PT: 'tpm' },
     polyTag: 'wnba',
+    teamStats: BASKETBALL_TEAM_STATS,
+    teamGames: 10,
+    dvp: BASKETBALL_DVP,
     kind: 'basketball',
     stats: BASKETBALL_STATS,
     markets: BASKETBALL_MARKETS,

@@ -145,6 +145,36 @@ button, select, input { font: inherit; color: inherit; }
 .venue.best { border-color: var(--accent); }
 .prices .vs { color: var(--muted); font-size: 12.5px; margin-left: 2px; }
 
+/* Matchups */
+.row > button.mu-head { grid-template-columns: 1fr auto; gap: 6px 12px; }
+.mu-teams { font-size: 19px; font-weight: 800; letter-spacing: -0.01em; }
+.mu-teams .at { color: var(--muted); font-weight: 500; }
+.mu-when { color: var(--muted); font-size: 13px; text-align: right; }
+.mu-spots { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.mu-spots span { font-size: 12.5px; color: var(--accent); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; }
+.mu-spots span.none { color: var(--muted); }
+.mu-side { display: grid; gap: 8px; }
+.mu-side + .mu-side { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.mu-side h4 { margin: 4px 0 0; }
+.tscroll { overflow-x: auto; }
+.mtable { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.mtable th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.mtable td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.mtable .num { text-align: right; font-variant-numeric: tabular-nums; }
+.mtable td.tough { color: var(--miss); }
+.mtable td.soft { color: var(--accent); }
+.up { color: var(--accent); }
+.down { color: var(--miss); }
+.pill { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pill small { font-weight: 400; color: var(--muted); }
+.pill.tough { border-color: var(--miss); color: var(--miss); }
+.pill.soft { border-color: var(--accent); color: var(--accent); }
+.watch { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13.5px; }
+.watch .muted { color: var(--muted); }
+.alldef { margin-top: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; }
+.alldef summary { cursor: pointer; font-weight: 600; }
+.alldef .mtable { margin-top: 8px; }
+
 /* Expanded detail */
 .detail { border-top: 1px solid var(--line); padding: 12px; background: var(--panel-2); }
 .detail h4 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
@@ -195,6 +225,8 @@ button, select, input { font: inherit; color: inherit; }
   .sheet li { font-size: 15.5px; }
   .controls { position: static; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .controls .seg, .controls .field.grow, .controls .toggles, .controls .chips { grid-column: 1 / -1; }
-  .seg button { flex: 1; }
+  .seg button { flex: 1; padding: 7px 4px; font-size: 13.5px; white-space: nowrap; }
+  .mtable { font-size: 12.5px; }
+  .mtable td, .mtable th { padding-right: 6px; }
   .brand .sub { margin-bottom: 10px; }
 }
