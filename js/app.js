@@ -600,7 +600,7 @@ function matchupSide(d, teams, dvp, off, def) {
     })
     .join('');
 
-  // One expandable block per position/stat: the summary line, then every game behind it.
+  // One table row per position/stat; tapping it reveals the games behind it in a row below.
   const posRows = [];
   for (const [group, ids] of Object.entries(cfg.dvp)) {
     for (const id of ids) {
@@ -609,19 +609,13 @@ function matchupSide(d, teams, dvp, off, def) {
       const games = a.games
         .map(
           (x) =>
-            `<li><span class="when">${esc(x.d.slice(5).replace('-', '/'))}</span><span class="who">${esc(x.name)} <span class="muted">${esc(x.team)}</span></span><span class="num">${fmt(x.v)}</span><span class="num muted">usual ${fmt(x.usual)}</span><span class="${x.v > x.usual ? 'up' : 'down'}">${x.v > x.usual ? '✓ over' : '✗ under'}</span></li>`,
+            `<li><span class="when">${esc(x.d.slice(5).replace('-', '/'))}</span><span class="who">${esc(x.name)} <span class="muted">${esc(x.team)}</span></span><span class="num">${fmt(x.v)}</span><span class="num muted">usual ${fmt(x.usual)}</span><span class="${x.v > x.usual ? 'up' : 'down'}">${x.v > x.usual ? '✓' : '✗'}</span></li>`,
         )
         .join('');
-      posRows.push(`<details class="dvp">
-        <summary>
-          <span class="lbl">${esc(group)} · ${esc(marketLabel(id))}</span>
-          <span class="num">${fmt(a.avg)}/g</span>
-          <span class="num">${a.overs}/${a.n} over</span>
-          <span class="num ${a.pct >= 0 ? 'up' : 'down'}">${signedPct(a.pct)}</span>
-          ${rankPill(a.rank, a.of)}
-        </summary>
-        <ul class="dvp-games">${games}</ul>
-      </details>`);
+      posRows.push(
+        `<tr class="dvp-row" data-dvp tabindex="0" aria-expanded="false"><td>${esc(group)} · ${esc(marketLabel(id))}</td><td class="num">${fmt(a.avg)}</td><td class="num">${a.overs}/${a.n}</td><td class="num ${a.pct >= 0 ? 'up' : 'down'}">${signedPct(a.pct)}</td><td>${rankPill(a.rank, a.of)}</td></tr>
+        <tr class="dvp-games-row" hidden><td colspan="5"><ul class="dvp-games">${games}</ul></td></tr>`,
+      );
     }
   }
 
@@ -655,16 +649,17 @@ function matchupSide(d, teams, dvp, off, def) {
     ${
       dt
         ? `<div class="tscroll"><table class="mtable">
-      <thead><tr><th>Defense (${dt.n} games)</th><th class="num">Per game</th><th>Rank of ${Object.values(teams).filter((x) => x.n).length}</th></tr></thead>
+      <thead><tr><th>Defense</th><th class="num">Per game</th><th>Rank of ${Object.values(teams).filter((x) => x.n).length}</th></tr></thead>
       <tbody>${defRows}</tbody>
     </table></div>`
         : `<p class="explain">Team defense numbers for ${esc(def)} aren't available right now.</p>`
     }
-    <h4>How opponents did vs ${esc(def)} this season</h4>
     ${
       posRows.length
-        ? `<p class="explain">Every tracked player who faced ${esc(def)} this season: average, how many went over their usual number, and by how much. Tap a row to see each game.</p>
-      <div class="dvp-list">${posRows.join('')}</div>`
+        ? `<div class="tscroll"><table class="mtable">
+      <thead><tr><th>Vs position</th><th class="num">Avg</th><th class="num">Beat usual</th><th class="num">Vs usual</th><th>Rank</th></tr></thead>
+      <tbody>${posRows.join('')}</tbody>
+    </table></div>`
         : `<p class="explain">No tracked players have faced ${esc(def)} yet this season.</p>`
     }
     ${watchHtml ? `<h4>${esc(off)} players to watch</h4><ul class="watch">${watchHtml}</ul>` : ''}
@@ -783,6 +778,13 @@ $('search').addEventListener('input', (e) => {
 });
 
 $('results').addEventListener('click', async (e) => {
+  const dvpRow = e.target.closest('[data-dvp]');
+  if (dvpRow) {
+    const games = dvpRow.nextElementSibling;
+    games.hidden = !games.hidden;
+    dvpRow.setAttribute('aria-expanded', String(!games.hidden));
+    return;
+  }
   const step = e.target.closest('[data-step]');
   if (step) {
     const key = step.dataset.key;
@@ -804,6 +806,13 @@ $('results').addEventListener('click', async (e) => {
   if (ex) {
     state.expanded = state.expanded === ex.dataset.expand ? null : ex.dataset.expand;
     render();
+  }
+});
+
+$('results').addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-dvp]')) {
+    e.preventDefault();
+    e.target.click();
   }
 });
 
