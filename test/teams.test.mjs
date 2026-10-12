@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { LEAGUES } from '../js/config.js';
-import { completedGames, parseSummary, rankTeams, buildTeamData } from '../js/teams.js';
+import { finishedOnScoreboard, parseSummary, rankTeams, buildTeamData } from '../js/teams.js';
 import { defenseVsPosition } from '../js/props.js';
 
 const nflStats = LEAGUES.nfl.teamStats;
@@ -20,16 +20,19 @@ function summary(home, away, homeScore, awayScore, homeOff, awayOff) {
   };
 }
 
-test('completedGames keeps finished non-preseason games, newest first', () => {
+test('finishedOnScoreboard keeps finished non-preseason games with both teams', () => {
+  const comp = (state, home, away) => [{ status: { type: { state } }, competitors: [{ team: { id: '1', abbreviation: home }, score: '24' }, { team: { id: '2', abbreviation: away }, score: { value: 17 } }] }];
   const json = {
     events: [
-      { id: '1', date: '2026-09-07T17:00Z', seasonType: { type: 2 }, competitions: [{ status: { type: { completed: true } } }] },
-      { id: '2', date: '2026-08-20T17:00Z', seasonType: { type: 1 }, competitions: [{ status: { type: { completed: true } } }] },
-      { id: '3', date: '2026-09-14T17:00Z', seasonType: { type: 2 }, competitions: [{ status: { type: { completed: true } } }] },
-      { id: '4', date: '2026-10-19T17:00Z', seasonType: { type: 2 }, competitions: [{ status: { type: { completed: false } } }] },
+      { id: '1', date: '2026-09-07T17:00Z', season: { type: 2 }, competitions: comp('post', 'HOU', 'BUF') },
+      { id: '2', date: '2026-08-20T17:00Z', season: { type: 1 }, competitions: comp('post', 'HOU', 'DAL') },
+      { id: '3', date: '2026-10-19T17:00Z', season: { type: 2 }, competitions: comp('pre', 'KC', 'LV') },
     ],
   };
-  assert.deepEqual(completedGames(json).map((g) => g.id), ['3', '1']);
+  const games = finishedOnScoreboard(json);
+  assert.deepEqual(games.map((g) => g.id), ['1']);
+  assert.equal(games[0].teams.HOU.score, 24);
+  assert.equal(games[0].teams.BUF.score, 17);
 });
 
 test('parseSummary credits each defense with what the other offense did', () => {
@@ -51,27 +54,56 @@ test('rankTeams: #1 allows the fewest, but makes the most sacks', () => {
   assert.equal(teams.B.ranks.sacks, 1);
 });
 
-test('buildTeamData averages allowed stats per team from schedules + box scores', async () => {
+test('buildTeamData finds games week by week and averages what each defense allowed', async () => {
+  const urls = [];
   const fetchJson = async (url) => {
-    if (url.endsWith('/teams?limit=100')) {
-      return { sports: [{ leagues: [{ teams: [{ team: { id: '34', abbreviation: 'HOU', displayName: 'Houston Texans' } }, { team: { id: '2', abbreviation: 'BUF', displayName: 'Buffalo Bills' } }] }] }] };
+    urls.push(url);
+    const wk = /week=(\d+)&dates=(\d+)/.exec(url);
+    if (wk) {
+      const week = Number(wk[1]);
+      if (Number(wk[2]) !== 2026 || week > 3) return { events: [] };
+      return {
+        events: [
+          {
+            id: `e${week}`,
+            date: `2026-09-0${week}T17:00Z`,
+            season: { type: 2 },
+            competitions: [{ status: { type: { state: 'post', completed: true } }, competitors: [{ team: { id: '34', abbreviation: 'HOU' }, score: '20' }, { team: { id: '2', abbreviation: 'BUF' }, score: String(20 + week) }] }],
+          },
+        ],
+      };
     }
-    if (url.includes('/schedule')) {
-      const done = { status: { type: { completed: true } } };
-      return { events: [1, 2, 3].map((i) => ({ id: `e${i}`, date: `2026-09-0${i}`, seasonType: { type: 2 }, competitions: [done] })) };
-    }
-    const m = /event=e(\d)/.exec(url);
-    const i = Number(m[1]);
+    const i = Number(/event=e(\d)/.exec(url)[1]);
     return summary('HOU', 'BUF', 20, 20 + i, { yds: 300, pass: 200, rush: 100, sacked: 2, to: 1 }, { yds: 300 + 30 * i, pass: 200, rush: 100 + 30 * i, sacked: 3, to: 2 });
   };
   const data = await buildTeamData(LEAGUES.nfl, { fetchJson, now: new Date('2026-10-12T00:00:00Z') });
   assert.equal(data.seasonNote, 'this season');
+  assert.ok(urls.some((u) => u.includes('/scoreboard?seasontype=2&week=1&dates=2026')));
   assert.equal(data.teams.HOU.n, 3);
   assert.equal(data.teams.HOU.stats.rushYds, 160); // (130+160+190)/3
   assert.equal(data.teams.HOU.stats.pts, 22);
   assert.equal(data.teams.BUF.stats.rushYds, 100);
   assert.equal(data.teams.BUF.ranks.rushYds, 1);
   assert.equal(data.teams.HOU.ranks.rushYds, 2);
+});
+
+test('buildTeamData (basketball) falls back to the end of last season when this one has no games', async () => {
+  const fetchJson = async (url) => {
+    const d = /dates=(\d{8})/.exec(url)[1];
+    if (d !== '20260413') return { events: [] };
+    return {
+      events: [{ id: 'n1', date: '2026-04-13T23:00Z', season: { type: 2 }, competitions: [{ status: { type: { completed: true } }, competitors: [{ team: { abbreviation: 'BOS' }, score: '110' }, { team: { abbreviation: 'NYK' }, score: '101' }] }] }],
+    };
+  };
+  const nbaSummary = (url) => ({ boxscore: { teams: [{ team: { abbreviation: 'BOS' }, statistics: [{ name: 'totalRebounds', displayValue: '44' }] }, { team: { abbreviation: 'NYK' }, statistics: [{ name: 'totalRebounds', displayValue: '39' }] }] } });
+  const data = await buildTeamData(LEAGUES.nba, {
+    fetchJson: (url) => (url.includes('/summary') ? Promise.resolve(nbaSummary(url)) : fetchJson(url)),
+    now: new Date('2026-10-12T00:00:00Z'),
+  });
+  assert.equal(data.seasonNote, 'last season');
+  assert.equal(data.teams.BOS.n, 1);
+  assert.equal(data.teams.BOS.stats.pts, 101); // score from the scoreboard when the summary has none
+  assert.equal(data.teams.BOS.stats.reb, 39);
 });
 
 test('defenseVsPosition: share of players who beat their usual against each defense', () => {

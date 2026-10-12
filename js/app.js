@@ -155,7 +155,7 @@ async function ensureTeams(force = false) {
   const key = state.league;
   if (!hasMatchups(key)) return;
   const cur = state.teams[key];
-  if (cur && (cur.loading || (!force && cur.data))) return;
+  if (cur && (cur.loading || (!force && cur.data && !cur.error))) return;
   state.teams[key] = { loading: true, data: cur && cur.data };
   if (state.view === 'matchups') render();
   let data = null;
@@ -552,9 +552,12 @@ function renderMatchupsView(d) {
   if (q) games = games.filter((g) => `${g.away} ${g.home} ${nameOf(g.away)} ${nameOf(g.home)}`.toLowerCase().includes(q));
 
   const bits = [];
-  if (t.error && !t.data) {
+  const hasDefense = Object.values(teams).some((x) => x.n);
+  if (!hasDefense) {
     status.className = 'status err';
-    bits.push(`Couldn't load team defense (${esc(t.error.message || t.error)}).`);
+    bits.push(
+      `Couldn't load team defense numbers${t.error ? ` (${esc(t.error.message || t.error)})` : ''}. The position stats below still work. Tap “Refresh from ESPN” to try again.`,
+    );
   } else {
     bits.push(`<b>${games.length}</b> upcoming game${games.length === 1 ? '' : 's'}`);
     if (t.data) bits.push(`team defense from ${esc(t.data.seasonNote || 'this season')}`);
@@ -588,7 +591,7 @@ function renderMatchupsView(d) {
 
 function matchupSide(d, teams, dvp, off, def) {
   const cfg = LEAGUES[state.league];
-  const dt = teams[def];
+  const dt = teams[def] && teams[def].n ? teams[def] : null;
   const defRows = cfg.teamStats
     .map((s) => {
       const v = dt && dt.stats[s.id];
@@ -649,10 +652,14 @@ function matchupSide(d, teams, dvp, off, def) {
 
   return `<section class="mu-side">
     <h4>${esc(off)} offense vs ${esc((dt && dt.name) || def)} defense</h4>
-    <div class="tscroll"><table class="mtable">
-      <thead><tr><th>Defense</th><th class="num">Per game</th><th>Rank of ${Object.values(teams).filter((x) => x.n).length}</th></tr></thead>
+    ${
+      dt
+        ? `<div class="tscroll"><table class="mtable">
+      <thead><tr><th>Defense (${dt.n} games)</th><th class="num">Per game</th><th>Rank of ${Object.values(teams).filter((x) => x.n).length}</th></tr></thead>
       <tbody>${defRows}</tbody>
-    </table></div>
+    </table></div>`
+        : `<p class="explain">Team defense numbers for ${esc(def)} aren't available right now.</p>`
+    }
     <h4>How opponents did vs ${esc(def)} this season</h4>
     ${
       posRows.length

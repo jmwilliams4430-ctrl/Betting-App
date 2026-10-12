@@ -167,6 +167,8 @@ export const LEAGUES = {
     teamStats: BASKETBALL_TEAM_STATS,
     teamGames: 10,
     dvp: BASKETBALL_DVP,
+    seasonEnd: '04-13', // last regular-season day, used before the new season has games
+    seasonEndYearOffset: -1,
     kind: 'basketball',
     stats: BASKETBALL_STATS,
     markets: BASKETBALL_MARKETS,
@@ -193,6 +195,8 @@ export const LEAGUES = {
     teamStats: BASKETBALL_TEAM_STATS,
     teamGames: 10,
     dvp: BASKETBALL_DVP,
+    seasonEnd: '09-12',
+    seasonEndYearOffset: 0,
     kind: 'basketball',
     stats: BASKETBALL_STATS,
     markets: BASKETBALL_MARKETS,
