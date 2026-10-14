@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { LEAGUES } from '../js/config.js';
 import { finishedOnScoreboard, parseSummary, rankTeams, buildTeamData } from '../js/teams.js';
-import { defenseVsPosition } from '../js/props.js';
+import { defenseVsPosition, usualValue, activePlayers } from '../js/props.js';
 
 const nflStats = LEAGUES.nfl.teamStats;
 
@@ -129,4 +129,25 @@ test('defenseVsPosition: share of players who beat their usual against each defe
   const dal = r.teams.DAL.RBs.rushYds;
   assert.equal(dal.overs, 0);
   assert.equal(dal.rank, 1);
+});
+
+test('usualValue uses this season once a player has 3+ games in it', () => {
+  const rushYds = LEAGUES.nfl.markets.find((m) => m.id === 'rushYds');
+  const last = Array.from({ length: 12 }, () => ({ s: 2025, rushYds: 10 }));
+  const starter = { games: [{ s: 2026, rushYds: 92 }, { s: 2026, rushYds: 81 }, { s: 2026, rushYds: 61 }, ...last] };
+  assert.equal(usualValue(starter, rushYds, 2026), 81);
+  const twoGames = { games: [{ s: 2026, rushYds: 92 }, { s: 2026, rushYds: 81 }, ...last] };
+  assert.equal(usualValue(twoGames, rushYds, 2026), 10); // not enough this season yet
+});
+
+test('activePlayers drops players who missed their team\'s recent games', () => {
+  const p = (name, team, d) => ({ name, team, games: [{ d }] });
+  const out = activePlayers([
+    p('Starter', 'SEA', '2026-10-11'),
+    p('On IR', 'SEA', '2026-09-20'),
+    p('Backup QB', 'SEA', '2025-12-28'),
+    p('Missed one', 'SEA', '2026-10-04'),
+    p('Other team', 'DEN', '2026-10-11'),
+  ]).map((x) => x.name);
+  assert.deepEqual(out, ['Starter', 'Missed one', 'Other team']);
 });

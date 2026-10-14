@@ -2,7 +2,7 @@ import { LEAGUES, LEAGUE_KEYS, LINE_FLOORS, DEFAULT_FLOOR } from './config.js';
 import { buildLeagueData } from './espn.js';
 import { fetchMarketQuotes, nameKey } from './odds.js';
 import { buildTeamData } from './teams.js';
-import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, formatNote, bestBets, americanOdds, defenseVsPosition, median } from './props.js';
+import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, formatNote, bestBets, americanOdds, defenseVsPosition, usualValue, activePlayers } from './props.js';
 
 const STATIC_MAX_AGE = 36 * 3600e3; // pre-built data/*.json older than this triggers a live pull
 const CACHE_MAX_AGE = 3 * 3600e3;
@@ -584,7 +584,7 @@ function renderMatchupsView(d) {
   });
 
   const table = renderDefenseTable(teams, cfg);
-  $('results').innerHTML = `<p class="explain">For each game: the defense's averages and league ranks (#1 = toughest, green = soft spot for overs), then how each position has done against that defense compared with each player's usual number (his median over his recent games).</p>
+  $('results').innerHTML = `<p class="explain">For each game: the defense's averages and league ranks (#1 = toughest, green = soft spot for overs), then how each position has done against that defense compared with each player's usual number (his median this season once he has 3 games, otherwise over his recent games). Players to watch skips anyone who hasn't played in the 10 days before his team's latest game (injured, benched or backup).</p>
     ${games.length ? `<ul class="list">${cards.join('')}</ul>` : '<div class="empty">No upcoming games on the schedule right now.</div>'}
     ${table}`;
 }
@@ -622,13 +622,14 @@ function matchupSide(d, teams, dvp, off, def) {
   // Offense players we track, with how their position has done against this defense.
   const markets = new Map(cfg.markets.map((m) => [m.id, m]));
   const watch = [];
-  for (const p of d.players || []) {
+  // Only players who've played recently: injured, benched and backup players drop off.
+  for (const p of activePlayers(d.players || [])) {
     if (p.team !== off) continue;
     const g = cfg.positionGroups.find((x) => x.match.includes(String(p.pos || '').toUpperCase()));
     const ids = g && cfg.dvp[g.label];
     if (!ids) continue;
     const id = ids[0];
-    const usual = median(p.games.map((x) => markets.get(id).value(x) ?? 0));
+    const usual = usualValue(p, markets.get(id), dvp.season);
     if (!(usual > 0)) continue;
     const a = ((dvp.teams[def] || {})[g.label] || {})[id];
     watch.push({ p, id, usual, a, group: g.label });

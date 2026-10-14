@@ -141,6 +141,26 @@ export function bestBets(players, markets, quotes, nameKey, opts = DEFAULT_OPTS)
 
 // ---------- Matchups: how each position group has done against each defense ----------
 
+// A player's "usual" number for a market: his median this season once he has 3+ games in it
+// (so a backup who became a starter is judged on his current role), else over all logged games.
+export function usualValue(player, market, season) {
+  const current = player.games.filter((g) => g.s === season);
+  const games = current.length >= 3 ? current : player.games;
+  return median(games.map((g) => market.value(g) ?? 0));
+}
+
+// Players who appeared in their team's latest game, or within `days` of it. Drops injured,
+// benched and backup players whose last game is weeks old (or from last season).
+export function activePlayers(players, days = 10) {
+  const latest = {};
+  for (const p of players) {
+    const d = p.games.length ? p.games[0].d : '';
+    if (d && (!latest[p.team] || d > latest[p.team])) latest[p.team] = d;
+  }
+  const cutoff = (team) => new Date(Date.parse(latest[team]) - days * 86400000).toISOString().slice(0, 10);
+  return players.filter((p) => p.games.length && latest[p.team] && p.games[0].d >= cutoff(p.team));
+}
+
 /**
  * For every defense, every position group and every stat in cfg.dvp: games our tracked
  * players had against that defense this season, their average, how many beat the player's
@@ -164,7 +184,7 @@ export function defenseVsPosition(players, cfg, minGames = 3) {
     for (const id of ids) {
       const m = markets.get(id);
       if (!m) continue;
-      const usual = median(p.games.map((g) => m.value(g) ?? 0));
+      const usual = usualValue(p, m, season);
       if (!(usual > 0)) continue;
       for (const g of p.games) {
         if (g.s !== season || !g.o) continue;
