@@ -40,7 +40,7 @@ Best Bets prices come from two public APIs that need no key:
 
 Matchups team defense comes from `site.api.espn.com/.../teams/{id}/schedule` and `.../summary?event={id}` box scores. "Allowed" means what opposing offenses put up. When the season has barely started (under 3 games), last season is used. The position-vs-defense numbers are computed in the browser from the tracked players' game logs.
 
-The hit rate is nudged toward 50% with (hits + 1) / (games + 2), so a 5-for-5 sample doesn't look like a sure thing. The page pulls prices live when it can and otherwise falls back to the `data/<league>-odds.json` file built by the workflow. The endpoints are undocumented, so ESPN can change them without notice.
+The hit rate is nudged toward 50% with (hits + 1) / (games + 2), so a 5-for-5 sample doesn't look like a sure thing. The page pulls prices live in the browser, and uses a `data/<league>-odds.json` file instead if one is hosted next to it. The endpoints are undocumented, so ESPN can change them without notice.
 
 ## Running it
 
@@ -52,12 +52,8 @@ npm test
 
 If `data/<league>.json` is missing or older than 36 hours, the page pulls the game logs live from ESPN in the browser instead. That can take a little while and is cached for 3 hours.
 
-## Hosting (GitHub Pages)
+## Hosting
 
-`.github/workflows/pages.yml` runs the tests, rebuilds the data every 4 hours and deploys the site. To turn it on:
+The site is plain static files, so any static host works. It's currently opened straight from GitHub through raw.githack.com. Each visitor's browser pulls the stats live from ESPN, Kalshi and Polymarket US, and caches them for a few hours.
 
-1. Make sure the code is on the default branch.
-2. Go to **Settings → Pages → Build and deployment → Source** and select **GitHub Actions**.
-3. Go to **Actions → "Update stats & deploy site" → Run workflow** for the first deploy.
-
-Prop lines and markets are defined in `js/config.js`.
+`.github/workflows/test.yml` runs the tests on every push. To pre-build data instead, run `npm run build:data` and host the `data/` folder next to the page; the site uses those files when they're less than 36 hours old.
