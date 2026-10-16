@@ -1,7 +1,7 @@
-// Player-prop prices from prediction markets (Kalshi + Polymarket US). Browser + Node.
+// Player-prop prices from Kalshi's public trade API. Browser + Node.
 //
 // Every quote is normalized to our "X+" form: `price` is the YES ask (0-1) exactly as the
-// venue shows it; `cost` adds the venue's taker fee and is what Best Bets compares against.
+// app shows it; `cost` adds Kalshi's taker fee and is what Best Bets compares against.
 import { defaultFetchJson } from './espn.js';
 
 const KALSHI = 'https://api.elections.kalshi.com/trade-api/v2';
@@ -105,126 +105,17 @@ async function fetchKalshi(cfg, { fetchJson, log, pace }) {
   return { quotes: out, ok: failed < series.length };
 }
 
-// ---------- Polymarket US ----------
-// Polymarket US (polymarket.us, the CFTC-regulated app US players use) runs its own exchange
-// with its own prices, separate from the international polymarket.com book. Its public
-// gateway needs no key and allows browser requests. Player props are "at least N" markets:
-//   event slug "nfl-hou-buf-2026-10-12"
-//   market { sportsMarketType: "football_player_passing_yards", line: 250,
-//            subject: { name: "C.J. Stroud" }, bestAskQuote: { value: "0.64" }, ... }
-const PMUS = 'https://gateway.polymarket.us/v1';
-
-// Stat part of sportsMarketType ("passing_yards" -> "passing yards") -> our market id.
-// Order matters: combos before their parts.
-const PMUS_STATS = {
-  football: [
-    [/^scrimmage yards$/, 'rushRecYds'],
-    [/^passing yards$/, 'passYds'],
-    [/^passing touchdowns$/, 'passTd'],
-    [/^passing completions$/, 'cmp'],
-    [/^interceptions thrown$/, 'int'],
-    [/^rushing yards$/, 'rushYds'],
-    [/^rushing attempts$/, 'rushAtt'],
-    [/^receiving yards$/, 'recYds'],
-    [/^receptions$/, 'rec'],
-    [/^touchdowns$/, 'anyTd'],
-  ],
-  basketball: [
-    [/points.*rebounds.*assists/, 'pra'],
-    [/points.*rebounds/, 'pr'],
-    [/points.*assists/, 'pa'],
-    [/rebounds.*assists/, 'ra'],
-    [/three|3pt|threes/, 'tpm'],
-    [/^rebounds$/, 'reb'],
-    [/^assists$/, 'ast'],
-    [/^steals$/, 'stl'],
-    [/^blocks$/, 'blk'],
-    [/^points$/, 'pts'],
-  ],
-};
-const PMUS_TITLE = /^(.*?)\s+(\d+)\+\s/;
-
-// Polymarket US taker fee (in effect since 2026-10-07): 0.0695 x P x (1 - P) per contract.
-export const polyFee = (p) => 0.0695 * p * (1 - p);
-
-export function parsePolyUsMarket(m, kind, eventSlug, date) {
-  const type = String(m.sportsMarketType || '');
-  const at = type.indexOf('_player_');
-  if (at < 0) return null;
-  if (m.closed || m.active === false) return null;
-  if (m.status && m.status !== 'MARKET_STATUS_OPEN') return null;
-  const statText = type.slice(at + 8).replace(/_/g, ' ');
-  const hit = (PMUS_STATS[kind] || []).find(([rx]) => rx.test(statText));
-  if (!hit) return null;
-  const titled = PMUS_TITLE.exec(m.title || '');
-  const name = (m.subject && m.subject.name) || (m.metadata && m.metadata.playerName) || (titled && titled[1]);
-  const n = num(m.line) ?? (titled ? Number(titled[2]) : null);
-  if (!name || n === null) return null;
-  const quote = (q) => (q && typeof q === 'object' ? num(q.value) : num(q));
-  const ask = quote(m.bestAskQuote);
-  const bid = quote(m.bestBidQuote);
-  if (!usable(ask)) return null;
-  if (bid !== null && ask - bid > 0.15) return null;
-  return {
-    v: 'P',
-    name: String(name).trim(),
-    m: hit[1],
-    line: Math.ceil(n), // "250+" (a line given as 249.5 also means 250+)
-    price: ask,
-    cost: Math.min(0.99, ask + polyFee(ask)),
-    date,
-    url: `https://polymarket.us/event/${eventSlug}`,
-  };
-}
-
-async function fetchPolymarket(cfg, { fetchJson, log, now }) {
-  if (!cfg.polyTag) return { quotes: [], ok: false };
-  const out = [];
-  const day = (offset) => new Date(now.getTime() + offset * 86400000).toISOString().slice(0, 10);
-  const slugRx = new RegExp(`^${cfg.polyTag}-([a-z]+)-([a-z]+)-(\\d{4}-\\d{2}-\\d{2})$`);
-  try {
-    const list = await fetchJson(
-      `${PMUS}/events?tagSlug=${cfg.polyTag}&active=true&closed=false&startDateMin=${day(-1)}T00:00:00Z&startDateMax=${day(9)}T00:00:00Z&limit=100`,
-    );
-    const events = ((list && list.events) || (Array.isArray(list) ? list : [])).filter((e) => slugRx.test(e.slug || ''));
-    for (const ev of events) {
-      const date = slugRx.exec(ev.slug)[3];
-      let markets = ev.markets;
-      if (!Array.isArray(markets) || !markets.length) {
-        try {
-          const full = await fetchJson(`${PMUS}/events/slug/${encodeURIComponent(ev.slug)}`);
-          markets = ((full && full.event) || full || {}).markets || [];
-        } catch (err) {
-          log.push(`polymarket ${ev.slug}: ${err.message}`);
-          markets = [];
-        }
-      }
-      for (const m of markets) {
-        const q = parsePolyUsMarket(m, cfg.kind, ev.slug, date);
-        if (q) out.push(q);
-      }
-    }
-    return { quotes: out, ok: true };
-  } catch (err) {
-    log.push(`polymarket: ${err.message}`);
-    return { quotes: out, ok: false };
-  }
-}
-
-/** All prediction-market quotes for a league. Never throws; check `ok` per venue. */
+/** Kalshi player-prop quotes for a league. Never throws; `venues.K` says whether Kalshi answered. */
 export async function fetchMarketQuotes(cfg, { fetchJson: baseFetch = defaultFetchJson, now = new Date(), pace = 0 } = {}) {
   const log = [];
   // Prices go stale fast; fail quickly rather than retrying.
   const fetchJson = (url) => baseFetch(url, { timeoutMs: 10000, retries: 0 });
-  const [k, p] = await Promise.all([
-    fetchKalshi(cfg, { fetchJson, log, pace }),
-    fetchPolymarket(cfg, { fetchJson, log, now }),
-  ]);
+  const k = await fetchKalshi(cfg, { fetchJson, log, pace });
   return {
     league: cfg.key,
     generatedAt: now.toISOString(),
-    venues: { K: k.ok, P: p.ok },
-    quotes: [...k.quotes, ...p.quotes],
+    venues: { K: k.ok },
+    quotes: k.quotes,
     log: log.slice(0, 40),
   };
 }

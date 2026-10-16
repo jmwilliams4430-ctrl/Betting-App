@@ -9,7 +9,7 @@ const CACHE_MAX_AGE = 3 * 3600e3;
 const ODDS_MAX_AGE = 12 * 3600e3; // pre-built market prices older than this are ignored
 const ODDS_REFRESH = 5 * 60e3; // re-pull live prices after this long
 const TEAMS_CACHE_AGE = 6 * 3600e3;
-const VENUES = { K: 'Kalshi', P: 'Polymarket US' };
+const VENUES = { K: 'Kalshi' };
 const HEADSHOT_PATH = { nfl: 'nfl', cfb: 'college-football', nba: 'nba', wnba: 'wnba' };
 
 const $ = (id) => document.getElementById(id);
@@ -121,9 +121,9 @@ async function ensureData(force = false) {
   if (key === state.league) render();
 }
 
-const hasMarkets = (key) => Boolean(LEAGUES[key].kalshiSeries || LEAGUES[key].polyTag);
+const hasMarkets = (key) => Boolean(LEAGUES[key].kalshiSeries);
 
-// Live prices from Kalshi + Polymarket, topped up per venue from the pre-built file
+// Live Kalshi prices, falling back to the pre-built file
 // (Kalshi in particular may refuse requests straight from a browser).
 async function ensureOdds(force = false) {
   const key = state.league;
@@ -440,9 +440,9 @@ function chart(games, values, line) {
 
 function betsStatus(rows) {
   const odds = state.odds[state.league];
-  if (!odds || odds.loading) return ['Loading Kalshi and Polymarket US prices…'];
+  if (!odds || odds.loading) return ['Loading Kalshi prices…'];
   const venues = Object.entries(odds.venues || {});
-  if (!venues.length) return ['Couldn\'t reach Kalshi or Polymarket US right now. Try “Refresh” in a minute.'];
+  if (!venues.length) return ['Couldn\'t reach Kalshi right now. Try “Refresh” in a minute.'];
   if (!odds.quotes.length) return [`No ${esc(LEAGUES[state.league].label)} player props are listed on ${venues.map(([v]) => VENUES[v]).join(' or ')} right now.`];
   const bits = [`<b>${rows.length}</b> of ${rows.priced || 0} priced props beat the market over the ${windowLabel()}`];
   const missing = Object.keys(VENUES).filter((v) => !odds.venues[v]);
@@ -482,7 +482,7 @@ function renderBets(rows, d) {
       ${open ? renderDetail(r) : ''}
     </li>`;
   });
-  return `<p class="explain">Edge = how often the player has cleared the market's line (adjusted for small samples) minus what it costs to buy on Kalshi or Polymarket US, with each one's trading fee added. Prices and odds shown are exactly what each app shows, before fees. Past hit rates don't account for injuries, matchups or role changes — use it as a starting point.</p>
+  return `<p class="explain">Edge = how often the player has cleared the market's line (adjusted for small samples) minus what it costs to buy on Kalshi, with Kalshi's trading fee added. Prices and odds shown are exactly what the Kalshi app shows, before the fee. Past hit rates don't account for injuries, matchups or role changes — use it as a starting point.</p>
     <ul class="list">${items.join('')}</ul>`;
 }
 
