@@ -229,21 +229,22 @@ async function discoverFromLeaderboards(cfg, fetchJson, now, log) {
   const found = new Map();
   for (const d of cfg.discovery) {
     const base = { region: 'us', lang: 'en', contentorigin: 'espn', limit: d.limit, groups: d.groups };
-    const attempts = [
-      { ...base, category: d.category, sort: d.sort },
-      { ...base, category: d.category, sort: d.sort, season: guessSeason(cfg, now) - 1, seasontype: 2 },
-      { ...base, category: d.category },
-    ];
-    let athletes = [];
-    for (const params of attempts) {
+    const board = async (params) => {
       try {
         const json = await fetchJson(`${WEB}/${cfg.sport}/${cfg.league}/statistics/byathlete${qs(params)}`);
-        athletes = Array.isArray(json.athletes) ? json.athletes : [];
-        if (athletes.length) break;
+        return Array.isArray(json.athletes) ? json.athletes : [];
       } catch (err) {
         log.push(`leaderboard ${d.sort || d.category}: ${err.message}`);
+        return [];
       }
+    };
+    let athletes = await board({ ...base, category: d.category, sort: d.sort });
+    // The first days of a season, this season's leaderboard only has players from the few
+    // teams that have played. Top it up with last season's leaders so every team is covered.
+    if (athletes.length < d.limit * 0.6) {
+      athletes = athletes.concat(await board({ ...base, category: d.category, sort: d.sort, season: guessSeason(cfg, now) - 1, seasontype: 2 }));
     }
+    if (!athletes.length) athletes = await board({ ...base, category: d.category });
     for (const row of athletes) mergeAthlete(found, pickAthlete(row.athlete || row));
   }
   return found;

@@ -178,3 +178,40 @@ test('anytime TD is a yes/no bet and ignores the median floor', () => {
   assert.equal(r.line, 1);
   assert.equal(r.hits, 9);
 });
+
+test('early in a season, last season\'s leaders top up a thin leaderboard', async () => {
+  const athlete = (id, team) => ({ athlete: { id, displayName: `Player ${id}`, position: { abbreviation: 'G' }, team: { abbreviation: team } } });
+  const seen = [];
+  const fetchJson = async (url) => {
+    if (url.includes('/statistics/byathlete')) {
+      if (url.includes('season=2026')) return { athletes: [athlete('1', 'BOS'), athlete('3', 'LAL'), athlete('4', 'DEN')] };
+      return { athletes: [athlete('1', 'BOS'), athlete('2', 'NYK')] }; // opening night only
+    }
+    if (url.includes('/scoreboard')) return { events: [] };
+    const id = /athletes\/(\d+)\/gamelog/.exec(url)[1];
+    seen.push(id);
+    return {
+      filters: [{ name: 'season', value: '2026' }],
+      names: ['minutes', 'points'],
+      events: { e1: { id: 'e1', gameDate: '2026-04-12T23:00Z', opponent: { abbreviation: 'MIA' }, team: { abbreviation: 'BOS' } } },
+      seasonTypes: [{ displayName: '2025-26 Regular Season', categories: [{ type: 'event', events: [{ eventId: 'e1', stats: ['34', '25'] }] }] }],
+    };
+  };
+  const data = await buildLeagueData(LEAGUES.nba, { fetchJson, now: new Date('2026-10-21T12:00:00Z') });
+  assert.deepEqual([...new Set(seen)].sort(), ['1', '2', '3', '4']);
+  assert.equal(data.players.length, 4);
+});
+
+test('a full leaderboard is not mixed with last season', async () => {
+  const urls = [];
+  const fetchJson = async (url) => {
+    urls.push(url);
+    if (url.includes('/statistics/byathlete')) {
+      return { athletes: Array.from({ length: 200 }, (_, i) => ({ athlete: { id: String(i), displayName: `P ${i}` } })) };
+    }
+    if (url.includes('/scoreboard')) return { events: [] };
+    throw new Error('HTTP 404');
+  };
+  await buildLeagueData(LEAGUES.nba, { fetchJson, now: new Date('2026-12-21T12:00:00Z'), maxPlayers: 1 });
+  assert.ok(!urls.some((u) => u.includes('/statistics/byathlete') && u.includes('season=')));
+});
