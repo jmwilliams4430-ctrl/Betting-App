@@ -163,8 +163,8 @@ export function activePlayers(players, days = 10) {
 
 /**
  * For every defense, every position group and every stat in cfg.dvp: games our tracked
- * players had against that defense this season, their average, how many beat the player's
- * usual (his median over all his logged games) and by how much on average.
+ * players had against that defense (this season, or its last cfg.dvpGames games), their
+ * average, how many beat the player's usual (see usualValue) and by how much on average.
  * rank 1 = toughest defense for that group/stat (players fell furthest below their usual).
  */
 export function defenseVsPosition(players, cfg, minGames = 3) {
@@ -175,6 +175,17 @@ export function defenseVsPosition(players, cfg, minGames = 3) {
   };
   let season = -Infinity;
   for (const p of players) if (p.games.length && p.games[0].s > season) season = p.games[0].s;
+
+  // cfg.dvpGames (basketball): each defense's last N games across seasons, so a new season's
+  // first nights count right away without leaving a 1-game sample. Otherwise: this season only.
+  const recent = {};
+  if (cfg.dvpGames) {
+    const dates = {};
+    for (const p of players) for (const g of p.games) if (g.o && g.d) (dates[g.o] = dates[g.o] || new Set()).add(g.d);
+    for (const [team, set] of Object.entries(dates)) recent[team] = new Set([...set].sort().reverse().slice(0, cfg.dvpGames));
+  }
+  const counts = (g) => (cfg.dvpGames ? recent[g.o] && recent[g.o].has(g.d) : g.s === season);
+  let mixed = false;
 
   const teams = {};
   for (const p of players) {
@@ -187,7 +198,8 @@ export function defenseVsPosition(players, cfg, minGames = 3) {
       const usual = usualValue(p, m, season);
       if (!(usual > 0)) continue;
       for (const g of p.games) {
-        if (g.s !== season || !g.o) continue;
+        if (!g.o || !counts(g)) continue;
+        if (g.s !== season) mixed = true;
         const v = m.value(g) ?? 0;
         const byGroup = (teams[g.o] = teams[g.o] || {});
         const byStat = (byGroup[group] = byGroup[group] || {});
@@ -219,5 +231,5 @@ export function defenseVsPosition(players, cfg, minGames = 3) {
       });
     }
   }
-  return { season: Number.isFinite(season) ? season : null, teams };
+  return { season: Number.isFinite(season) ? season : null, window: cfg.dvpGames || null, mixed, teams };
 }

@@ -151,3 +151,36 @@ test('activePlayers drops players who missed their team\'s recent games', () => 
   ]).map((x) => x.name);
   assert.deepEqual(out, ['Starter', 'Missed one', 'Other team']);
 });
+
+test('buildTeamData (basketball) mixes last night with the end of last season', async () => {
+  const game = (id, date, home, away) => ({
+    id,
+    date: `${date}T23:00Z`,
+    season: { type: 2 },
+    competitions: [{ status: { type: { completed: true } }, competitors: [{ team: { abbreviation: home }, score: '110' }, { team: { abbreviation: away }, score: '100' }] }],
+  });
+  const fetchJson = async (url) => {
+    if (url.includes('/summary')) {
+      return { boxscore: { teams: [{ team: { abbreviation: 'BOS' }, statistics: [{ name: 'totalRebounds', displayValue: '40' }] }, { team: { abbreviation: 'NYK' }, statistics: [{ name: 'totalRebounds', displayValue: '45' }] }] } };
+    }
+    const d = /dates=(\d{8})/.exec(url)[1];
+    if (d === '20261020') return { events: [game('new1', '2026-10-20', 'BOS', 'NYK')] };
+    if (d === '20260413') return { events: [game('old1', '2026-04-13', 'BOS', 'NYK')] };
+    return { events: [] };
+  };
+  const data = await buildTeamData(LEAGUES.nba, { fetchJson, now: new Date('2026-10-21T12:00:00Z') });
+  assert.match(data.seasonNote, /this season \+ end of last season/);
+  assert.equal(data.teams.BOS.n, 2);
+});
+
+test('defenseVsPosition (basketball) uses each defense\'s last 10 games across seasons', () => {
+  const g = (d, s, pts) => ({ o: 'NYK', d, s, pts, min: 34 });
+  const old = Array.from({ length: 12 }, (_, i) => g(`2026-04-${String(13 - i).padStart(2, '0')}`, 2026, 20));
+  const players = [{ id: '1', name: 'Guard', pos: 'PG', team: 'BOS', games: [g('2026-10-20', 2027, 30), ...old] }];
+  const r = defenseVsPosition(players, LEAGUES.nba);
+  const a = r.teams.NYK.Guards.pts;
+  assert.equal(a.n, 10); // last night + 9 from last season, not just the 1 new game
+  assert.equal(a.games[0].d, '2026-10-20');
+  assert.equal(r.window, 10);
+  assert.equal(r.mixed, true);
+});

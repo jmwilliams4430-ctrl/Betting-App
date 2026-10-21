@@ -561,7 +561,8 @@ function renderMatchupsView(d) {
   } else {
     bits.push(`<b>${games.length}</b> upcoming game${games.length === 1 ? '' : 's'}`);
     if (t.data) bits.push(`team defense from ${esc(t.data.seasonNote || 'this season')}`);
-    if (dvp.season) bits.push(`positions vs defense from ${dvp.season} games of tracked players`);
+    if (dvp.window) bits.push(`positions vs defense from each team's last ${dvp.window} games${dvp.mixed ? ' (incl. end of last season)' : ''}`);
+    else if (dvp.season) bits.push(`positions vs defense from ${dvp.season} games of tracked players`);
   }
   status.innerHTML = bits.join(' · ');
 

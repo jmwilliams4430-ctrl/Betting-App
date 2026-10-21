@@ -165,6 +165,7 @@ export const LEAGUES = {
     teamStats: BASKETBALL_TEAM_STATS,
     teamGames: 10,
     dvp: BASKETBALL_DVP,
+    dvpGames: 10, // positions vs defense: each defense's last 10 games, across seasons
     seasonEnd: '04-13', // last regular-season day, used before the new season has games
     seasonEndYearOffset: -1,
     kind: 'basketball',
@@ -192,6 +193,7 @@ export const LEAGUES = {
     teamStats: BASKETBALL_TEAM_STATS,
     teamGames: 10,
     dvp: BASKETBALL_DVP,
+    dvpGames: 10, // positions vs defense: each defense's last 10 games, across seasons
     seasonEnd: '09-12',
     seasonEndYearOffset: 0,
     kind: 'basketball',

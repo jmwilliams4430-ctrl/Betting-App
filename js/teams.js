@@ -149,13 +149,19 @@ async function findGames(cfg, base, fetchJson, now, log) {
       if (counts.length && Math.min(...counts) >= cfg.teamGames) break;
     }
   };
+  // Each team's last `teamGames` games: this season's first, topped up from the end of
+  // last season until the new season has enough of its own.
   await walkDays(new Date(now.getTime() - 86400000), 35);
-  if (enough()) return { games: [...found.values()], note: 'this season' };
-  found.clear();
+  const counts = Object.values(perTeam());
+  if (counts.length && Math.min(...counts) >= cfg.teamGames) return { games: [...found.values()], note: 'this season' };
+  const current = found.size;
   const [mm, dd] = cfg.seasonEnd.split('-').map(Number);
   const year = guessSeason(cfg, now) + (cfg.seasonEndYearOffset || 0);
   await walkDays(new Date(Date.UTC(year, mm - 1, dd, 12)), 35);
-  return { games: [...found.values()], note: 'last season' };
+  const note = current
+    ? `each team's last ${cfg.teamGames} games (this season + end of last season)`
+    : 'last season';
+  return { games: [...found.values()], note };
 }
 
 /** Season-to-date defense for every team in the league. */
