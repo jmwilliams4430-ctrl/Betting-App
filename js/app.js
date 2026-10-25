@@ -2,6 +2,7 @@ import { LEAGUES, LEAGUE_KEYS, LINE_FLOORS, DEFAULT_FLOOR } from './config.js';
 import { buildLeagueData } from './espn.js';
 import { fetchMarketQuotes, nameKey } from './odds.js';
 import { buildTeamData } from './teams.js';
+import { fetchInjuries, injuriesByTeam, returningPlayers } from './injuries.js';
 import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, formatNote, bestBets, americanOdds, defenseVsPosition, usualValue, activePlayers } from './props.js';
 
 const STATIC_MAX_AGE = 36 * 3600e3; // pre-built data/*.json older than this triggers a live pull
@@ -9,6 +10,7 @@ const CACHE_MAX_AGE = 3 * 3600e3;
 const ODDS_MAX_AGE = 12 * 3600e3; // pre-built market prices older than this are ignored
 const ODDS_REFRESH = 5 * 60e3; // re-pull live prices after this long
 const TEAMS_CACHE_AGE = 6 * 3600e3;
+const INJURY_REFRESH = 15 * 60e3; // re-pull the injury report after this long
 const VENUES = { K: 'Kalshi' };
 const HEADSHOT_PATH = { nfl: 'nfl', cfb: 'college-football', nba: 'nba', wnba: 'wnba' };
 
@@ -47,6 +49,7 @@ const state = {
   data: {}, // league -> dataset
   odds: {}, // league -> { quotes, venues, generatedAt, log, fetchedAt }
   teams: {}, // league -> { data, error, loading, progress }
+  injuries: {}, // league -> { data, loading, fetchedAt }
   expanded: null, // "playerId:marketId"
   custom: {}, // "playerId:marketId" -> custom line
   loading: false,
@@ -180,6 +183,22 @@ async function ensureTeams(force = false) {
     }
   }
   state.teams[key] = { data: data || (cur && cur.data) || null, error, loading: false };
+  if (key === state.league && state.view === 'matchups') render();
+}
+
+// Injury report: live from ESPN, else the pre-built file (12h max).
+async function ensureInjuries(force = false) {
+  const key = state.league;
+  if (!hasMatchups(key)) return;
+  const cur = state.injuries[key];
+  if (cur && (cur.loading || (!force && Date.now() - cur.fetchedAt < INJURY_REFRESH))) return;
+  state.injuries[key] = { ...(cur || {}), loading: true };
+  let data = await fetchInjuries(LEAGUES[key]);
+  if (!data.ok) {
+    const stat = await fetchStatic(`${key}-injuries`);
+    if (stat && stat.ok && age(stat) < ODDS_MAX_AGE) data = { ...stat, fromFile: true, log: data.log };
+  }
+  state.injuries[key] = { data, loading: false, fetchedAt: Date.now() };
   if (key === state.league && state.view === 'matchups') render();
 }
 
@@ -535,7 +554,8 @@ function renderMatchupsView(d) {
   const t = state.teams[state.league];
   const status = $('status');
   $('updated').textContent = d.generatedAt ? `Updated ${new Date(d.generatedAt).toLocaleString()}` : '';
-  const log = [...(d.log || []), ...((t && t.data && t.data.log) || [])];
+  const injState = state.injuries[state.league];
+  const log = [...(d.log || []), ...((t && t.data && t.data.log) || []), ...((injState && injState.data && injState.data.log) || [])];
   $('diag').hidden = !log.length;
   $('diagText').textContent = log.join('\n');
 
@@ -546,6 +566,7 @@ function renderMatchupsView(d) {
   }
   const teams = (t.data && t.data.teams) || {};
   const dvp = dvpFor(d);
+  const inj = injuryContext(d, teams, dvp);
   const q = state.search.trim().toLowerCase();
   const nameOf = (abbr) => (teams[abbr] && teams[abbr].name) || abbr;
   let games = upcomingGames(d.schedule);
@@ -563,6 +584,9 @@ function renderMatchupsView(d) {
     if (t.data) bits.push(`team defense from ${esc(t.data.seasonNote || 'this season')}`);
     if (dvp.window) bits.push(`positions vs defense from each team's last ${dvp.window} games${dvp.mixed ? ' (incl. end of last season)' : ''}`);
     else if (dvp.season) bits.push(`positions vs defense from ${dvp.season} games of tracked players`);
+    if (inj.updated) bits.push(`injury report ${inj.live ? 'as of' : 'from'} ${new Date(inj.updated).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
+    else if (inj.loading) bits.push('loading injury report…');
+    else bits.push('injury report unavailable');
   }
   status.innerHTML = bits.join(' · ');
 
@@ -570,7 +594,9 @@ function renderMatchupsView(d) {
     const key = `g:${g.away}@${g.home}`;
     const open = state.expanded === key;
     const when = g.t ? new Date(g.t).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+    const injChips = [g.away, g.home].flatMap((team) => keyInjuryChips(inj, team));
     const spots = [
+      ...injChips,
       ...softSpots(dvp, g.home).map((x) => `${esc(g.away)} ${esc(x.group)}: ${esc(marketLabel(x.id))} ${signedPct(x.a.pct)} vs ${esc(g.home)}`),
       ...softSpots(dvp, g.away).map((x) => `${esc(g.home)} ${esc(x.group)}: ${esc(marketLabel(x.id))} ${signedPct(x.a.pct)} vs ${esc(g.away)}`),
     ];
@@ -580,17 +606,17 @@ function renderMatchupsView(d) {
         <span class="mu-when">${g.live ? 'LIVE' : esc(when)}</span>
         <span class="mu-spots">${spots.length ? spots.map((x) => `<span>${x}</span>`).join('') : '<span class="none">Tap for defense and position stats</span>'}</span>
       </button>
-      ${open ? `<div class="detail">${matchupSide(d, teams, dvp, g.away, g.home)}${matchupSide(d, teams, dvp, g.home, g.away)}</div>` : ''}
+      ${open ? `<div class="detail">${matchupSide(d, teams, dvp, inj, g.away, g.home)}${matchupSide(d, teams, dvp, inj, g.home, g.away)}</div>` : ''}
     </li>`;
   });
 
   const table = renderDefenseTable(teams, cfg);
-  $('results').innerHTML = `<p class="explain">For each game: the defense's averages and league ranks (#1 = toughest, green = soft spot for overs), then how each position has done against that defense compared with each player's usual number (his median this season once he has 3 games, otherwise over his recent games). Players to watch skips anyone who hasn't played in the 10 days before his team's latest game (injured, benched or backup).</p>
+  $('results').innerHTML = `<p class="explain">For each game: the defense's averages and league ranks (#1 = toughest, green = soft spot for overs), then how each position has done against that defense compared with each player's usual number (his median this season once he has 3 games, otherwise over his recent games). Players to watch skips anyone who hasn't played in the 10 days before his team's latest game (injured, benched or backup). Injuries come from ESPN's injury report: OUT, DOUBT (doubtful), Q (questionable), DTD (day-to-day), and BACK for a tracked player who missed recent games but is off the report now.</p>
     ${games.length ? `<ul class="list">${cards.join('')}</ul>` : '<div class="empty">No upcoming games on the schedule right now.</div>'}
     ${table}`;
 }
 
-function matchupSide(d, teams, dvp, off, def) {
+function matchupSide(d, teams, dvp, inj, off, def) {
   const cfg = LEAGUES[state.league];
   const dt = teams[def] && teams[def].n ? teams[def] : null;
   const defRows = cfg.teamStats
@@ -640,7 +666,7 @@ function matchupSide(d, teams, dvp, off, def) {
     .slice(0, 8)
     .map(
       (w) =>
-        `<li><b>${esc(w.p.name)}</b> <span class="muted">${esc(w.p.pos)}</span> · usual ${fmt(w.usual)} ${esc(marketLabel(w.id))}${
+        `<li>${playerBadge(inj, w.p)}<b>${esc(w.p.name)}</b> <span class="muted">${esc(w.p.pos)}</span> · usual ${fmt(w.usual)} ${esc(marketLabel(w.id))}${
           w.a ? ` · <span class="${w.a.pct >= 0 ? 'up' : 'down'}">${esc(w.group)} vs ${esc(def)} ${signedPct(w.a.pct)}</span>` : ''
         }</li>`,
     )
@@ -665,7 +691,78 @@ function matchupSide(d, teams, dvp, off, def) {
         : `<p class="explain">No tracked players have faced ${esc(def)} yet this season.</p>`
     }
     ${watchHtml ? `<h4>${esc(off)} players to watch</h4><ul class="watch">${watchHtml}</ul>` : ''}
+    ${injurySection(inj, off, def)}
   </section>`;
+}
+
+// ---------- Injuries in Matchups ----------
+
+const OFFENSE_POS = new Set(['QB', 'RB', 'FB', 'HB', 'WR', 'TE', 'T', 'G', 'C', 'OT', 'OG', 'OL', 'LT', 'RT', 'LG', 'RG']);
+const BADGE = { out: 'OUT', doubtful: 'DOUBT', q: 'Q', dtd: 'DTD' };
+
+function injuryContext(d, teams, dvp) {
+  const st = state.injuries[state.league];
+  const data = st && st.data;
+  const list = (data && data.ok && data.list) || [];
+  const players = d.players || [];
+  const byTeam = injuriesByTeam(list, teams, players);
+  const byPlayer = new Map(list.filter((x) => x.id).map((x) => [x.id, x]));
+  const back = {};
+  for (const r of returningPlayers(players, new Set(byPlayer.keys()), dvp.season)) (back[r.player.team] = back[r.player.team] || []).push(r);
+  const tracked = new Set(players.map((p) => String(p.id)));
+  return {
+    byTeam,
+    byPlayer,
+    back,
+    tracked,
+    updated: data && data.ok ? data.generatedAt : null,
+    live: Boolean(data && data.ok && !data.fromFile),
+    loading: Boolean(st && st.loading && !data),
+  };
+}
+
+const isNew = (x) => x.date && Date.now() - Date.parse(x.date) < 7 * 86400000;
+
+function injuryLine(x) {
+  const when = isNew(x)
+    ? '<span class="inj-new">new this week</span>'
+    : x.date
+      ? `<span class="muted">since ${esc(new Date(x.date).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }))}</span>`
+      : '';
+  const ret = x.returnDate ? ` <span class="muted">· est. return ${esc(new Date(x.returnDate).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }))}</span>` : '';
+  return `<li><span class="inj-badge ${x.level}">${BADGE[x.level]}</span><b>${esc(x.name)}</b> <span class="muted">${esc(x.pos)}${x.part ? ` · ${esc(x.part)}` : ''}</span> ${when}${ret}</li>`;
+}
+
+function playerBadge(inj, p) {
+  const x = inj.byPlayer.get(String(p.id));
+  if (x) return `<span class="inj-badge ${x.level}">${BADGE[x.level]}</span>`;
+  if ((inj.back[p.team] || []).some((r) => r.player.id === p.id)) return '<span class="inj-badge back">BACK</span>';
+  return '';
+}
+
+// Collapsed-card chips: tracked (prop-relevant) players who are hurt or returning.
+function keyInjuryChips(inj, team) {
+  const hurt = (inj.byTeam[team] || []).filter((x) => inj.tracked.has(x.id) && x.level !== 'dtd');
+  const chips = hurt.slice(0, 3).map((x) => `<span class="chip-inj">${BADGE[x.level]} ${esc(x.name)} (${esc(team)})</span>`);
+  for (const r of (inj.back[team] || []).slice(0, 2)) chips.push(`<span class="chip-back">BACK ${esc(r.player.name)} (${esc(team)})</span>`);
+  return chips;
+}
+
+function injurySection(inj, off, def) {
+  if (!inj.updated) return '';
+  const football = LEAGUES[state.league].kind === 'football';
+  const offList = (inj.byTeam[off] || []).filter((x) => !football || !x.pos || OFFENSE_POS.has(x.pos.toUpperCase()));
+  const defList = football ? (inj.byTeam[def] || []).filter((x) => x.pos && !OFFENSE_POS.has(x.pos.toUpperCase())) : [];
+  const backList = (inj.back[off] || []).map(
+    (r) =>
+      `<li><span class="inj-badge back">BACK</span><b>${esc(r.player.name)}</b> <span class="muted">${esc(r.player.pos)} · missed last ${r.missed} game${r.missed === 1 ? '' : 's'}, not on the report now</span></li>`,
+  );
+  const block = (title, items) =>
+    `<div class="inj-block"><h5>${title}</h5>${items.length ? `<ul class="inj">${items.join('')}</ul>` : '<p class="muted inj-none">Nothing on the report.</p>'}</div>`;
+  return `<h4>Injuries</h4><div class="inj-grid">
+    ${block(`${esc(off)} ${football ? 'offense' : 'roster'}`, [...backList, ...offList.map(injuryLine)])}
+    ${football ? block(`${esc(def)} defense`, defList.map(injuryLine)) : ''}
+  </div>`;
 }
 
 function renderDefenseTable(teams, cfg) {
@@ -733,7 +830,10 @@ $('leagues').addEventListener('click', (e) => {
   savePrefs();
   ensureData();
   ensureOdds();
-  if (state.view === 'matchups') ensureTeams();
+  if (state.view === 'matchups') {
+    ensureTeams();
+    ensureInjuries();
+  }
 });
 
 $('view').addEventListener('click', (e) => {
@@ -744,7 +844,10 @@ $('view').addEventListener('click', (e) => {
   savePrefs();
   render();
   if (state.view === 'bets') ensureOdds();
-  if (state.view === 'matchups') ensureTeams();
+  if (state.view === 'matchups') {
+    ensureTeams();
+    ensureInjuries();
+  }
 });
 
 $('markets').addEventListener('click', (e) => {
@@ -821,7 +924,10 @@ $('results').addEventListener('keydown', (e) => {
 $('refresh').addEventListener('click', () => {
   ensureData(true);
   if (state.view === 'bets') ensureOdds(true);
-  if (state.view === 'matchups') ensureTeams(true);
+  if (state.view === 'matchups') {
+    ensureTeams(true);
+    ensureInjuries(true);
+  }
 });
 
 $('floor').innerHTML = LINE_FLOORS.map((f) => `<option value="${f.value}">${esc(f.label)}</option>`).join('');
@@ -829,4 +935,7 @@ if (!LINE_FLOORS.some((f) => String(f.value) === state.floor)) state.floor = Str
 renderChrome();
 ensureData();
 if (state.view === 'bets') ensureOdds();
-if (state.view === 'matchups') ensureTeams();
+if (state.view === 'matchups') {
+  ensureTeams();
+  ensureInjuries();
+}

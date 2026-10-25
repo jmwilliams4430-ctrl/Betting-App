@@ -184,6 +184,31 @@ button, select, input { font: inherit; color: inherit; }
 .dvp-games .when, .dvp-games .muted { color: var(--muted); }
 .dvp-games .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Injuries (Matchups) */
+.mu-spots .chip-inj { color: var(--miss); }
+.mu-spots .chip-back { color: var(--accent); }
+.inj-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 18px; }
+.inj-block h5 { margin: 0 0 4px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.inj { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13.5px; }
+.inj .muted, .inj-none { color: var(--muted); }
+.inj-none { margin: 0; font-size: 13px; }
+.inj-new { color: var(--warn); font-size: 12px; }
+.inj-badge {
+  display: inline-block;
+  min-width: 34px;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 800;
+  text-align: center;
+  letter-spacing: .03em;
+  border: 1px solid currentColor;
+}
+.inj-badge.out, .inj-badge.doubtful { color: var(--miss); }
+.inj-badge.q, .inj-badge.dtd { color: var(--warn); }
+.inj-badge.back { color: var(--accent); }
+
 /* Expanded detail */
 .detail { border-top: 1px solid var(--line); padding: 12px; background: var(--panel-2); }
 .detail h4 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }

@@ -5,6 +5,7 @@ import { LEAGUES, LEAGUE_KEYS } from '../js/config.js';
 import { buildLeagueData } from '../js/espn.js';
 import { fetchMarketQuotes } from '../js/odds.js';
 import { buildTeamData } from '../js/teams.js';
+import { fetchInjuries } from '../js/injuries.js';
 
 const keys = process.argv.slice(2).length ? process.argv.slice(2) : LEAGUE_KEYS;
 const outDir = new URL('../data/', import.meta.url);
@@ -38,6 +39,14 @@ for (const key of keys) {
     console.log(`  markets: Kalshi ${odds.venues.K ? by('K') : 'unavailable'}`);
     for (const line of odds.log.slice(0, 8)) console.log(`  ! ${line}`);
     await writeFile(new URL(`${key}-odds.json`, outDir), JSON.stringify(odds));
+  }
+
+  // Injury report for the Matchups tab (the browser pulls it live when it can).
+  if (cfg.teamStats) {
+    const injuries = await fetchInjuries(cfg);
+    console.log(`  injuries: ${injuries.ok ? `${injuries.list.length} listed` : 'unavailable'}`);
+    for (const line of injuries.log.slice(0, 3)) console.log(`  ! ${line}`);
+    if (injuries.ok) await writeFile(new URL(`${key}-injuries.json`, outDir), JSON.stringify(injuries));
   }
 
   // Team defense for the Matchups tab.

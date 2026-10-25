@@ -10,6 +10,8 @@ A cheatsheet-style website showing how often NFL, college football, NBA and WNBA
   - The opposing players to watch.
 
   Ranks: #1 is the toughest defense, and green marks a soft spot for overs.
+
+  Each game also shows ESPN's injury report: OUT, DOUBT, Q and DTD tags, whether the injury is new this week, and an estimated return date when ESPN lists one. Football games list the offense's injuries and the other team's defensive injuries. BACK marks a tracked player who missed recent games but is no longer on the report. Injured tracked players show on the collapsed game card.
 - **Cheatsheet**: the same results grouped by position in the "Stroud 200+ Pass Yds 4/5 (Missed last)" format, with a Copy button.
 - Filters: sample (last 5/10/15/20 or this season), minimum hit rate, prop type, search, "Playing next" (teams on the upcoming slate), and "Best prop per player".
 
@@ -34,6 +36,8 @@ Stats come from ESPN's free public JSON endpoints, which need no API key:
 Preseason games are ignored.
 
 Best Bets prices come from Kalshi's public API, which needs no key: `api.elections.kalshi.com/trade-api/v2/markets?series_ticker=…`, using the per-game player series such as `KXNFLPASSYDS` and `KXNBAPTS` (the full list is in `js/config.js`). Each rung reads "Player: 250+", and the price is the YES ask, plus Kalshi's taker fee (0.07 × P × (1 − P)).
+
+Injuries come from `site.web.api.espn.com/apis/site/v2/sports/{sport}/{league}/injuries` (falling back to `site.api.espn.com`), pulled live when the tab opens and every 15 minutes after that, or from `data/<league>-injuries.json`.
 
 Matchups team defense comes from `site.api.espn.com/.../teams/{id}/schedule` and `.../summary?event={id}` box scores. "Allowed" means what opposing offenses put up. When the season has barely started (under 3 games), last season is used. The position-vs-defense numbers are computed in the browser from the tracked players' game logs.
 
