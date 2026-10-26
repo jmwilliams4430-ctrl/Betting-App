@@ -38,7 +38,7 @@ for (const key of keys) {
   if (cfg.kalshiSeries) {
     const odds = await fetchMarketQuotes(cfg, { pace: 400 });
     const by = (v) => odds.quotes.filter((q) => q.v === v).length;
-    console.log(`  markets: Kalshi ${odds.venues.K ? by('K') : 'unavailable'}`);
+    console.log(`  markets: Kalshi ${odds.venues.K ? by('K') : 'unavailable'}${cfg.kalshiScalar ? `, ladders/escalators ${odds.scalars.length}` : ''}`);
     for (const line of odds.log.slice(0, 8)) console.log(`  ! ${line}`);
     await writeFile(new URL(`${key}-odds.json`, outDir), JSON.stringify(odds));
   }

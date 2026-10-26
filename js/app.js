@@ -1,9 +1,10 @@
 import { LEAGUES, LEAGUE_KEYS, LINE_FLOORS, DEFAULT_FLOOR } from './config.js';
 import { buildLeagueData, fetchPlayerGames } from './espn.js';
-import { fetchMarketQuotes, nameKey } from './odds.js';
+import { fetchMarketQuotes, nameKey, kalshiFee } from './odds.js';
 import { buildTeamData } from './teams.js';
 import { fetchInjuries, injuriesByTeam, returningPlayers } from './injuries.js';
 import { fetchRoster, searchPlayers } from './roster.js';
+import { scalarRows } from './ladders.js';
 import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, formatNote, bestBets, americanOdds, defenseVsPosition, usualValue, activePlayers, median, upcomingGames } from './props.js';
 
 const STATIC_MAX_AGE = 36 * 3600e3; // pre-built data/*.json older than this triggers a live pull
@@ -55,6 +56,7 @@ const state = {
   injuries: {}, // league -> { data, loading, fetchedAt }
   rosters: {}, // league -> { players, loading }
   lookups: {}, // "league:playerId" -> { games, error, loading, fetchedAt }
+  betsKind: 'props', // Best bets: 'props' (yes/no lines) or 'ladders' (ladders + escalators)
   pick: null, // Players tab: { league, id, name, pos, team, teamId }
   pickMarket: null,
   expanded: null, // "playerId:marketId"
@@ -65,8 +67,8 @@ if (!LEAGUES[state.league]) state.league = 'nfl';
 if (state.pick && state.pick.league !== state.league) state.pick = null;
 
 function savePrefs() {
-  const { league, view, window, minRate, floor, market, upcoming, onePer, pick } = state;
-  store.set('prefs', { league, view, window, minRate, floor, market, upcoming, onePer, pick });
+  const { league, view, window, minRate, floor, market, upcoming, onePer, pick, betsKind } = state;
+  store.set('prefs', { league, view, window, minRate, floor, market, upcoming, onePer, pick, betsKind });
 }
 
 // ---------- data loading ----------
@@ -145,17 +147,20 @@ async function ensureOdds(force = false) {
   if (state.view === 'bets') render();
   const [live, stat] = await Promise.all([fetchMarketQuotes(LEAGUES[key]), fetchStatic(`${key}-odds`)]);
   const quotes = [];
+  const scalars = [];
   const venues = {};
   for (const v of Object.keys(VENUES)) {
     if (live.venues[v]) {
       quotes.push(...live.quotes.filter((q) => q.v === v));
+      scalars.push(...(live.scalars || []).filter((q) => q.v === v));
       venues[v] = 'live';
     } else if (stat && stat.venues && stat.venues[v] && age(stat) < ODDS_MAX_AGE) {
       quotes.push(...stat.quotes.filter((q) => q.v === v));
+      scalars.push(...(stat.scalars || []).filter((q) => q.v === v));
       venues[v] = stat.generatedAt;
     }
   }
-  state.odds[key] = { quotes, venues, log: live.log, fetchedAt: Date.now(), loading: false };
+  state.odds[key] = { quotes, scalars, venues, log: live.log, fetchedAt: Date.now(), loading: false };
   if (key === state.league && state.view === 'bets') render();
 }
 
@@ -340,7 +345,8 @@ function renderChrome() {
   for (const id of ['minRate', 'floor']) $(id).closest('.field').hidden = state.view === 'bets' || mu || pl;
   $('window').closest('.field').hidden = mu;
   $('upcoming').closest('.chk').hidden = state.view === 'bets' || mu || pl;
-  $('onePer').closest('.chk').hidden = mu || pl;
+  const lad = state.view === 'bets' && state.betsKind === 'ladders' && hasLadders(state.league);
+  $('onePer').closest('.chk').hidden = mu || pl || lad;
   $('markets').hidden = mu || pl;
   $('search').placeholder = pl ? `Search any ${LEAGUES[state.league].label} player` : 'Player or team';
   $('window').value = state.window;
@@ -349,8 +355,10 @@ function renderChrome() {
   $('upcoming').checked = state.upcoming;
   $('onePer').checked = state.onePer;
   const cfg = LEAGUES[state.league];
-  if (state.market !== 'all' && !cfg.markets.some((m) => m.id === state.market)) state.market = 'all';
-  $('markets').innerHTML = [{ id: 'all', label: 'All props' }, ...cfg.markets]
+  // Ladders only exist for receiving yards, rushing yards and receptions.
+  const chipMarkets = lad ? cfg.markets.filter((m) => Object.values(cfg.kalshiScalar).some((x) => x.stat === m.id)) : cfg.markets;
+  if (state.market !== 'all' && !chipMarkets.some((m) => m.id === state.market)) state.market = 'all';
+  $('markets').innerHTML = [{ id: 'all', label: 'All props' }, ...chipMarkets]
     .map((m) => `<button data-market="${m.id}" aria-pressed="${m.id === state.market}">${esc(m.label)}</button>`)
     .join('');
 }
@@ -364,6 +372,9 @@ function render() {
   const status = $('status');
   status.className = 'status';
   if (state.view === 'players') return renderPlayersView(d);
+  if (state.view === 'bets' && state.betsKind === 'ladders' && hasLadders(state.league) && !(d.error && !(d.players || []).length)) {
+    return renderLadders(d);
+  }
   if (state.view === 'matchups' && !(d.error && !(d.players || []).length)) return renderMatchupsView(d);
   const { rows, hasSchedule } = filteredRows(d);
 
@@ -397,11 +408,11 @@ function render() {
           ? 'None of the listed props beat their price over this sample right now. Try a different sample.'
           : ''
         : 'Nothing clears that bar. Try a lower hit rate, a different sample, or “Deep alts” under Lines.';
-    $('results').innerHTML = (d.players || []).length && msg ? `<div class="empty">${msg}</div>` : '';
+    $('results').innerHTML = (state.view === 'bets' ? betsToggle() : '') + ((d.players || []).length && msg ? `<div class="empty">${msg}</div>` : '');
     return;
   }
   $('results').innerHTML =
-    state.view === 'sheet' ? renderSheet(rows, d) : state.view === 'bets' ? renderBets(rows, d) : renderList(rows, d);
+    state.view === 'sheet' ? renderSheet(rows, d) : state.view === 'bets' ? betsToggle() + renderBets(rows, d) : renderList(rows, d);
 }
 
 function gameTag(d, p) {
@@ -828,6 +839,70 @@ function renderDefenseTable(teams, cfg) {
   </details>`;
 }
 
+// ---------- Best bets: ladders & escalators ----------
+
+const hasLadders = (key) => Boolean(LEAGUES[key].kalshiScalar);
+const STAT_LABEL = { recYds: 'Rec Yds', rushYds: 'Rush Yds', rec: 'Receptions' };
+const signedCents = (x) => `${x >= 0 ? '+' : '−'}${(Math.abs(x) * 100).toFixed(1)}¢`;
+
+function betsToggle() {
+  if (!hasLadders(state.league)) return '';
+  const b = (k, label) => `<button data-bets-kind="${k}" aria-pressed="${state.betsKind === k}">${label}</button>`;
+  return `<div class="chips bets-kind">${b('props', 'Yes/no props')}${b('ladders', 'Ladders &amp; escalators')}</div>`;
+}
+
+function renderLadders(d) {
+  const status = $('status');
+  const odds = state.odds[state.league];
+  const q = state.search.trim().toLowerCase();
+  let players = d.players || [];
+  if (q) players = players.filter((p) => `${p.name} ${p.team}`.toLowerCase().includes(q));
+  let rows = scalarRows(players, (odds && odds.scalars) || [], nameKey, opts());
+  if (state.market !== 'all') rows = rows.filter((r) => r.q.stat === state.market);
+  const good = rows.filter((r) => r.edge > 0).length;
+  if (!odds || odds.loading) status.innerHTML = 'Loading Kalshi prices…';
+  else if (!(odds.scalars || []).length) status.innerHTML = Object.keys(odds.venues || {}).length ? 'No ladders or escalators are listed on Kalshi right now.' : betsStatus([])[0];
+  else status.innerHTML = `<b>${good}</b> of ${rows.length} ladders &amp; escalators are worth more than their price over the ${windowLabel()}`;
+  const log = [...(d.log || []), ...((odds && odds.log) || [])];
+  $('diag').hidden = !log.length;
+  $('diagText').textContent = log.join('\n');
+
+  const items = rows.slice(0, 150).map((r, i) => {
+    const p = r.player;
+    const key = `l:${p.id}:${r.q.kind}:${r.q.stat}`;
+    const open = state.expanded === key;
+    const ladder = r.q.kind === 'ladder';
+    const unit = ladder ? (r.q.stat === 'rec' ? '5¢ per catch' : '0.25¢ per yard') : 'pays more for bigger games';
+    const sideCost = r.side === 'YES' ? r.q.cost : 1 - r.q.bid + kalshiFee(r.q.bid);
+    const roi = r.edge / sideCost;
+    const read = ladder
+      ? `Price expects <b>${fmt(r.implied)}</b> ${r.q.stat === 'rec' ? 'catches' : 'yds'} · his avg ${fmt(r.avg)} (median ${fmt(r.med)})`
+      : `Worth <b>${cents(r.worth)}</b> a game on his ${r.games.length} games · paid more than the price in ${r.beat}/${r.games.length}`;
+    const games = r.games
+      .map((g, j) => `<li><span class="when">${esc(g.d.slice(5).replace('-', '/'))}</span><span class="who">${esc(g.h === '@' ? '@' : 'vs')} ${esc(g.o)}</span><span class="num">${fmt(r.values[j])}</span><span class="num muted">pays ${(r.pays[j] * 100).toFixed(1)}¢</span><span class="${r.pays[j] > r.q.price ? 'up' : 'down'}">${r.pays[j] > r.q.price ? '✓' : '✗'}</span></li>`)
+      .join('');
+    return `<li class="row">
+      <button data-expand="${esc(key)}" aria-expanded="${open}">
+        <span class="rank">${i + 1}</span>
+        <img class="avatar" src="${headshot(p)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+        <span class="who">
+          <div class="name">${esc(p.name)}</div>
+          <div class="meta">${esc(p.team)}${p.pos ? ` · ${esc(p.pos)}` : ''}${gameTag(d, p)}</div>
+          <div class="prop"><b>${esc(STAT_LABEL[r.q.stat] || r.q.stat)} ${ladder ? 'ladder' : 'escalator'}</b> <span class="pct">· ${unit}</span></div>
+        </span>
+        <span class="score ${r.edge > 0 ? 'edge' : 'neg'}">
+          <div class="frac">${r.edge > 0 ? `${r.side} +${Math.round(roi * 100)}%` : `${Math.round(roi * 100)}%`}</div>
+          <div class="pct">${signedCents(r.edge)} / contract</div>
+        </span>
+      </button>
+      <div class="prices"><a href="${esc(r.q.url)}" target="_blank" rel="noopener" class="venue best">Kalshi YES ${cents(r.q.price)}${r.q.bid ? ` <span>· NO ${cents(1 - r.q.bid)}</span>` : ''}</a><span class="vs">${read}</span></div>
+      ${open ? `<div class="detail"><h4>What each game would have paid</h4><ul class="dvp-games">${games}</ul></div>` : ''}
+    </li>`;
+  });
+  $('results').innerHTML = `${betsToggle()}<p class="explain">Ladders pay a fixed slice of $1 per yard or catch (rec/rush yards 0.25¢ a yard up to 400, receptions 5¢ a catch up to 20). Escalators pay (yards ÷ 200)³ in 10-yard steps (catches: (n ÷ 14)³), so most of their value is in rare huge games. “Worth” is what the contract would have paid on average over the ${windowLabel()}; the edge compares that with buying YES at the ask, or NO at 1 − bid, after Kalshi's fee. Escalator numbers swing a lot on small samples — one 150-yard game moves them.</p>
+    ${rows.length ? `<ul class="list">${items.join('')}</ul>` : ''}`;
+}
+
 // ---------- Players: any player's game log ----------
 
 function seasonLabel(s) {
@@ -1097,6 +1172,13 @@ $('results').addEventListener('click', async (e) => {
     games.hidden = !games.hidden;
     dvpRow.setAttribute('aria-expanded', String(!games.hidden));
     return;
+  }
+  const kindBtn = e.target.closest('[data-bets-kind]');
+  if (kindBtn) {
+    state.betsKind = kindBtn.dataset.betsKind;
+    state.expanded = null;
+    savePrefs();
+    return render();
   }
   const pickBtn = e.target.closest('[data-pick]');
   if (pickBtn) return openPlayer(state.matches.get(pickBtn.dataset.pick));

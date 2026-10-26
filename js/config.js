@@ -154,6 +154,15 @@ export const LEAGUES = {
       KXNFLRSHYDS: 'rushYds', KXNFLRSHATT: 'rushAtt', KXNFLRECYDS: 'recYds', KXNFLREC: 'rec',
       KXNFLRRYDS: 'rushRecYds', KXNFLTD: 'anyTd',
     },
+    // Ladders / escalators: pay a slice of $1 by the final stat (payout rules in ladders.js).
+    kalshiScalar: {
+      KXNFLLADDERRECYDS: { kind: 'ladder', stat: 'recYds' },
+      KXNFLLADDERRSHYDS: { kind: 'ladder', stat: 'rushYds' },
+      KXNFLLADDERREC: { kind: 'ladder', stat: 'rec' },
+      KXNFLESCALATORRECYDS: { kind: 'escalator', stat: 'recYds' },
+      KXNFLESCALATORRSHYDS: { kind: 'escalator', stat: 'rushYds' },
+      KXNFLESCALATORREC: { kind: 'escalator', stat: 'rec' },
+    },
     teamStats: FOOTBALL_TEAM_STATS,
     teamGames: 17,
     dvp: FOOTBALL_DVP,

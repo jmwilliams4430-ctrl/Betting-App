@@ -184,6 +184,11 @@ button, select, input { font: inherit; color: inherit; }
 .dvp-games .when, .dvp-games .muted { color: var(--muted); }
 .dvp-games .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Ladders */
+.bets-kind { margin-top: 8px; }
+.score.neg .frac { color: var(--muted); font-size: 16px; }
+.dvp-games li > .num.muted { white-space: nowrap; }
+
 /* Players */
 @media (max-width: 420px) { .seg button { padding: 7px 8px; font-size: 14px; } }
 .row > button.pl-row { grid-template-columns: 44px 1fr auto; }

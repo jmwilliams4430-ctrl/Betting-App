@@ -38,6 +38,13 @@ export function nameKey(s) {
 const KALSHI_EVENT = /-(\d{2})([A-Z]{3})(\d{2})/;
 const KALSHI_RUNG = /^(.+?):\s*(\d+)\+/;
 
+// Player code inside a ticker, shared by every market on the same player and game:
+// "KXNFLRECYDS-26OCT26DALPHI-DALCLAMB88-60" -> "26OCT26DALPHI-DALCLAMB88".
+export function playerCode(ticker) {
+  const parts = String(ticker || '').split('-');
+  return parts.length >= 3 ? `${parts[1]}-${parts[2]}` : '';
+}
+
 export function parseKalshiMarket(m, marketId, series) {
   if (m.status && !['active', 'open'].includes(m.status)) return null;
   if (m.strike_type && m.strike_type !== 'greater') return null;
@@ -63,7 +70,7 @@ export function parseKalshiMarket(m, marketId, series) {
   };
 }
 
-async function fetchKalshiSeries(ticker, marketId, { fetchJson, pace }) {
+async function fetchKalshiSeries(ticker, marketId, { fetchJson, pace, names }) {
   const out = [];
   let cursor = '';
   for (let page = 0; page < 10; page++) {
@@ -73,9 +80,67 @@ async function fetchKalshiSeries(ticker, marketId, { fetchJson, pace }) {
     for (const m of markets) {
       const q = parseKalshiMarket(m, marketId, ticker);
       if (q) out.push(q);
+      // Remember who each ticker's player code is, for ladders (their titles may not name him).
+      const rung = names && KALSHI_RUNG.exec(m.yes_sub_title || m.title || '');
+      if (rung && playerCode(m.ticker)) names.set(playerCode(m.ticker), rung[1].trim());
     }
     cursor = json.cursor || '';
     if (!cursor || !markets.length) break;
+  }
+  return out;
+}
+
+// ---------- Ladders / escalators (NFL) ----------
+// One market per player per game; YES pays a slice of $1 by the final stat (see ladders.js).
+// The player comes from the matching yes/no markets' ticker code, else from the title.
+const SCALAR_WORDS = /\b(ladder|escalator|slingshot|receiving|rushing|rush|rec|yards?|yds|receptions?|catches)\b/gi;
+
+export function scalarName(m) {
+  const raw = String(m.yes_sub_title || m.title || '').split(/[:(|]/)[0].replace(SCALAR_WORDS, '').replace(/\s+/g, ' ').trim();
+  return raw.split(' ').length >= 2 ? raw : '';
+}
+
+export function parseScalarMarket(m, spec, series, names) {
+  if (m.status && !['active', 'open'].includes(m.status)) return null;
+  const ev = KALSHI_EVENT.exec(m.event_ticker || m.ticker || '');
+  const name = (names && names.get(playerCode(m.ticker))) || scalarName(m);
+  if (!ev || !MONTHS[ev[2]] || !name) return null;
+  const ask = num(m.yes_ask_dollars) ?? (num(m.yes_ask) !== null ? num(m.yes_ask) / 100 : null);
+  const bid = num(m.yes_bid_dollars) ?? (num(m.yes_bid) !== null ? num(m.yes_bid) / 100 : null);
+  // Escalators trade at a few cents, so only the top of the range is ruled out.
+  if (!(ask > 0 && ask < 0.98)) return null;
+  if (bid !== null && ask - bid > Math.max(0.05, ask * 0.5)) return null;
+  return {
+    v: 'K',
+    kind: spec.kind,
+    stat: spec.stat,
+    name,
+    price: ask,
+    bid,
+    cost: Math.min(0.99, ask + kalshiFee(ask)),
+    date: `20${ev[1]}-${String(MONTHS[ev[2]]).padStart(2, '0')}-${ev[3]}`,
+    url: `https://kalshi.com/markets/${series.toLowerCase()}`,
+  };
+}
+
+async function fetchScalars(cfg, { fetchJson, pace, names, log }) {
+  const out = [];
+  let sampled = false;
+  for (const [ticker, spec] of Object.entries(cfg.kalshiScalar || {})) {
+    try {
+      if (pace) await new Promise((r) => setTimeout(r, pace));
+      const json = await fetchJson(`${KALSHI}/markets?series_ticker=${ticker}&status=open&limit=1000`);
+      for (const m of json.markets || []) {
+        if (!sampled) {
+          sampled = true;
+          log.push(`ladder sample ${m.ticker}: title "${m.title || ''}" / sub "${m.yes_sub_title || ''}" / ask ${m.yes_ask_dollars ?? m.yes_ask}`);
+        }
+        const q = parseScalarMarket(m, spec, ticker, names);
+        if (q) out.push(q);
+      }
+    } catch (err) {
+      log.push(`kalshi ${ticker}: ${err.message}`);
+    }
   }
   return out;
 }
@@ -85,12 +150,13 @@ async function fetchKalshiSeries(ticker, marketId, { fetchJson, pace }) {
 // when `pace` is set (the Node builder, which stays under Kalshi's rate limit).
 async function fetchKalshi(cfg, { fetchJson, log, pace }) {
   const series = Object.entries(cfg.kalshiSeries || {});
-  if (!series.length) return { quotes: [], ok: false };
+  if (!series.length) return { quotes: [], scalars: [], ok: false };
   const out = [];
+  const names = new Map();
   let failed = 0;
   const run = async ([ticker, marketId]) => {
     try {
-      out.push(...(await fetchKalshiSeries(ticker, marketId, { fetchJson, pace })));
+      out.push(...(await fetchKalshiSeries(ticker, marketId, { fetchJson, pace, names })));
       return true;
     } catch (err) {
       failed++;
@@ -99,10 +165,11 @@ async function fetchKalshi(cfg, { fetchJson, log, pace }) {
     }
   };
   const [first, ...rest] = series;
-  if (!(await run(first))) return { quotes: out, ok: false };
+  if (!(await run(first))) return { quotes: out, scalars: [], ok: false };
   if (pace) for (const item of rest) await run(item);
   else await Promise.all(rest.map(run));
-  return { quotes: out, ok: failed < series.length };
+  const scalars = await fetchScalars(cfg, { fetchJson, pace, names, log });
+  return { quotes: out, scalars, ok: failed < series.length };
 }
 
 /** Kalshi player-prop quotes for a league. Never throws; `venues.K` says whether Kalshi answered. */
@@ -116,6 +183,7 @@ export async function fetchMarketQuotes(cfg, { fetchJson: baseFetch = defaultFet
     generatedAt: now.toISOString(),
     venues: { K: k.ok },
     quotes: k.quotes,
+    scalars: k.scalars || [],
     log: log.slice(0, 40),
   };
 }
