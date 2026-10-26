@@ -3,7 +3,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { LEAGUES, LEAGUE_KEYS } from '../js/config.js';
 import { buildLeagueData } from '../js/espn.js';
-import { fetchMarketQuotes } from '../js/odds.js';
+import { fetchMarketQuotes, nameKey } from '../js/odds.js';
+import { scalarRows } from '../js/ladders.js';
 import { buildTeamData } from '../js/teams.js';
 import { fetchInjuries } from '../js/injuries.js';
 import { fetchRoster } from '../js/roster.js';
@@ -41,6 +42,18 @@ for (const key of keys) {
     console.log(`  markets: Kalshi ${odds.venues.K ? by('K') : 'unavailable'}${cfg.kalshiScalar ? `, ladders/escalators ${odds.scalars.length}` : ''}`);
     for (const line of odds.log.slice(0, 8)) console.log(`  ! ${line}`);
     await writeFile(new URL(`${key}-odds.json`, outDir), JSON.stringify(odds));
+    // Ladder / escalator values in the log, matching the site's check (last 10 games).
+    if (odds.scalars.length) {
+      console.log(`::group::Ladders ${cfg.label}`);
+      const c = (x) => `${(x * 100).toFixed(1)}c`;
+      for (const r of scalarRows(data.players, odds.scalars, nameKey, { window: 10, minGames: 5 })) {
+        const read = r.implied !== null ? `implies ${r.implied.toFixed(1)}, ` : '';
+        console.log(`${r.player.name} (${r.player.team}) ${r.q.stat} ${r.q.kind} ${r.q.date}: YES ${c(r.q.price)} / bid ${r.q.bid === null ? '-' : c(r.q.bid)}; ${read}L10 avg ${r.avg.toFixed(1)} med ${r.med} [${r.values.join(' ')}]; worth ${c(r.worth)}; best ${r.side} ${r.edge >= 0 ? '+' : ''}${c(r.edge)}`);
+      }
+      const unmatched = odds.scalars.filter((q) => !data.players.some((p) => nameKey(p.name) === nameKey(q.name)));
+      if (unmatched.length) console.log(`not tracked: ${unmatched.map((q) => `${q.name} ${q.stat} ${q.kind} ${c(q.price)}`).join('; ')}`);
+      console.log('::endgroup::');
+    }
   }
 
   // Injury report for the Matchups tab (the browser pulls it live when it can).
