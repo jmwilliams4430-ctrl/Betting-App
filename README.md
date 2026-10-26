@@ -12,6 +12,7 @@ A cheatsheet-style website showing how often NFL, college football, NBA and WNBA
   Ranks: #1 is the toughest defense, and green marks a soft spot for overs.
 
   Each game also shows ESPN's injury report: OUT, DOUBT, Q and DTD tags, whether the injury is new this week, and an estimated return date when ESPN lists one. Football games list the offense's injuries and the other team's defensive injuries. BACK marks a tracked player who missed recent games but is no longer on the report. Injured tracked players show on the collapsed game card.
+- **Players**: search any player in the league (NFL, NBA and WNBA search every rostered player; college football searches the tracked stat leaders). Each player shows their averages and medians, a bar chart for any prop with an adjustable line, and their full game log for the last 5/10/15/20 games or this season. "Full game log →" under a Top hitters row opens the same page.
 - **Cheatsheet**: the same results grouped by position in the "Stroud 200+ Pass Yds 4/5 (Missed last)" format, with a Copy button.
 - Filters: sample (last 5/10/15/20 or this season), minimum hit rate, prop type, search, "Playing next" (teams on the upcoming slate), and "Best prop per player".
 
@@ -36,6 +37,8 @@ Stats come from ESPN's free public JSON endpoints, which need no API key:
 Preseason games are ignored.
 
 Best Bets prices come from Kalshi's public API, which needs no key: `api.elections.kalshi.com/trade-api/v2/markets?series_ticker=…`, using the per-game player series such as `KXNFLPASSYDS` and `KXNBAPTS` (the full list is in `js/config.js`). Each rung reads "Player: 250+", and the price is the YES ask, plus Kalshi's taker fee (0.07 × P × (1 − P)).
+
+The Players search list comes from `.../teams` and `.../teams/{id}/roster` (from `data/<league>-roster.json`, up to a week old, else live). A picked player's game log is pulled live in full (up to 100 games, so a whole NBA season fits), falling back to the stored games.
 
 Injuries come from `site.web.api.espn.com/apis/site/v2/sports/{sport}/{league}/injuries` (falling back to `site.api.espn.com`), pulled live when the tab opens and every 15 minutes after that, or from `data/<league>-injuries.json`.
 

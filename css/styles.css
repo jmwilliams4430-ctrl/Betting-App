@@ -184,6 +184,26 @@ button, select, input { font: inherit; color: inherit; }
 .dvp-games .when, .dvp-games .muted { color: var(--muted); }
 .dvp-games .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Players */
+@media (max-width: 420px) { .seg button { padding: 7px 8px; font-size: 14px; } }
+.row > button.pl-row { grid-template-columns: 44px 1fr auto; }
+.chev { color: var(--muted); font-size: 22px; padding-right: 2px; }
+.pcard { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin-top: 8px; display: grid; gap: 12px; min-width: 0; }
+.pcard .detail { padding: 0; border: 0; }
+.pl-head { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.avatar.big { width: 64px; height: 64px; flex: none; }
+.pl-head .name { font-size: 20px; }
+.pl-sub { color: var(--muted); font-size: 13px; margin-top: -6px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+.tile { all: unset; box-sizing: border-box; cursor: pointer; border: 1px solid var(--line); border-radius: 10px; padding: 7px 9px; display: grid; gap: 1px; }
+.tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tile[aria-pressed="true"] { border-color: var(--accent); }
+.tile .tl, .tile .tm { color: var(--muted); font-size: 12px; }
+.tile b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.glog tr.grp th { color: var(--text); border-bottom: 0; padding-bottom: 0; }
+.glog tfoot td { font-weight: 700; border-bottom: 0; }
+.glog .muted { color: var(--muted); }
+
 /* Injuries (Matchups) */
 .mu-spots .chip-inj { color: var(--miss); }
 .mu-spots .chip-back { color: var(--accent); }

@@ -6,6 +6,7 @@ import { buildLeagueData } from '../js/espn.js';
 import { fetchMarketQuotes } from '../js/odds.js';
 import { buildTeamData } from '../js/teams.js';
 import { fetchInjuries } from '../js/injuries.js';
+import { fetchRoster } from '../js/roster.js';
 
 const keys = process.argv.slice(2).length ? process.argv.slice(2) : LEAGUE_KEYS;
 const outDir = new URL('../data/', import.meta.url);
@@ -47,6 +48,14 @@ for (const key of keys) {
     console.log(`  injuries: ${injuries.ok ? `${injuries.list.length} listed` : 'unavailable'}`);
     for (const line of injuries.log.slice(0, 3)) console.log(`  ! ${line}`);
     if (injuries.ok) await writeFile(new URL(`${key}-injuries.json`, outDir), JSON.stringify(injuries));
+  }
+
+  // Every rostered player, so the Players tab can search beyond the tracked ones.
+  if (cfg.roster) {
+    const roster = await fetchRoster(cfg);
+    console.log(`  roster: ${roster.ok ? `${roster.players.length} players` : 'unavailable'}`);
+    for (const line of roster.log.slice(0, 3)) console.log(`  ! ${line}`);
+    if (roster.ok) await writeFile(new URL(`${key}-roster.json`, outDir), JSON.stringify(roster));
   }
 
   // Team defense for the Matchups tab.

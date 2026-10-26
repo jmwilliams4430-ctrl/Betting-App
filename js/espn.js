@@ -185,11 +185,12 @@ function gamelogUrl(cfg, id, season) {
   return `${WEB}/${cfg.sport}/${cfg.league}/athletes/${id}/gamelog${qs({ season })}`;
 }
 
-export async function fetchPlayerGames(cfg, id, { fetchJson = defaultFetchJson, now = new Date() } = {}) {
+// maxGames / enough: the Players tab asks for a full season and at least 20 games.
+export async function fetchPlayerGames(cfg, id, { fetchJson = defaultFetchJson, now = new Date(), maxGames = MAX_GAMES, enough = ENOUGH_GAMES } = {}) {
   const first = parseGamelog(await fetchJson(gamelogUrl(cfg, id)), cfg, null);
   let games = first.games;
   let season = first.season || guessSeason(cfg, now);
-  for (let tries = 0; games.length < ENOUGH_GAMES && tries < 2; tries++) {
+  for (let tries = 0; games.length < enough && tries < 2; tries++) {
     season -= 1;
     try {
       const older = parseGamelog(await fetchJson(gamelogUrl(cfg, id, season)), cfg, season);
@@ -201,7 +202,7 @@ export async function fetchPlayerGames(cfg, id, { fetchJson = defaultFetchJson, 
     }
   }
   games.sort((a, b) => String(b.t).localeCompare(String(a.t)));
-  return games.slice(0, MAX_GAMES);
+  return games.slice(0, maxGames);
 }
 
 function pickAthlete(a, extra = {}) {

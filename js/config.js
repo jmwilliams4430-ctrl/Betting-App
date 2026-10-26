@@ -81,6 +81,39 @@ const BASKETBALL_MARKETS = [
   { id: 'blk', label: 'Blocks', group: 'Defense', ladder: [1, 2], value: (s) => s.blk, eligible: isRotation },
 ];
 
+// Players tab: game-log columns. A group shows when the player does that job (show(games)).
+const FOOTBALL_LOG = [
+  { label: 'Passing', show: (g) => avgOf(g, 'att') >= 3, cols: [
+    { label: 'C/ATT', value: (s) => s.cmp, text: (s) => `${s.cmp ?? 0}/${s.att ?? 0}` },
+    { label: 'YDS', value: (s) => s.passYds },
+    { label: 'TD', value: (s) => s.passTd },
+    { label: 'INT', value: (s) => s.int },
+  ] },
+  { label: 'Rushing', show: (g) => avgOf(g, 'rushAtt') >= 1, cols: [
+    { label: 'CAR', value: (s) => s.rushAtt },
+    { label: 'YDS', value: (s) => s.rushYds },
+    { label: 'TD', value: (s) => s.rushTd },
+  ] },
+  { label: 'Receiving', show: (g) => avgOf(g, 'rec') >= 0.5 || avgOf(g, 'tgt') >= 1, cols: [
+    { label: 'REC', value: (s) => s.rec },
+    { label: 'TGT', value: (s) => s.tgt },
+    { label: 'YDS', value: (s) => s.recYds },
+    { label: 'TD', value: (s) => s.recTd },
+  ] },
+];
+const BASKETBALL_LOG = [
+  { label: '', show: () => true, cols: [
+    { label: 'MIN', value: (s) => s.min },
+    { label: 'PTS', value: (s) => s.pts },
+    { label: 'REB', value: (s) => s.reb },
+    { label: 'AST', value: (s) => s.ast },
+    { label: '3PM', value: (s) => s.tpm },
+    { label: 'STL', value: (s) => s.stl },
+    { label: 'BLK', value: (s) => s.blk },
+    { label: 'PRA', value: (s) => (s.pts ?? 0) + (s.reb ?? 0) + (s.ast ?? 0) },
+  ] },
+];
+
 // Discovery: which leaderboard pulls give us the players worth tracking.
 // Each request is tried; failures are tolerated (scoreboard leaders are a second source).
 const FOOTBALL_DISCOVERY = (limits) => [
@@ -124,9 +157,11 @@ export const LEAGUES = {
     teamStats: FOOTBALL_TEAM_STATS,
     teamGames: 17,
     dvp: FOOTBALL_DVP,
+    roster: true, // Players tab can search every rostered player
     kind: 'football',
     stats: FOOTBALL_STATS,
     markets: FOOTBALL_MARKETS,
+    log: FOOTBALL_LOG,
     discovery: FOOTBALL_DISCOVERY({ passing: 34, rushing: 60, receiving: 90 }),
     scoreboard: { params: {} },
     positionGroups: [
@@ -144,6 +179,7 @@ export const LEAGUES = {
     kind: 'football',
     stats: FOOTBALL_STATS,
     markets: FOOTBALL_MARKETS,
+    log: FOOTBALL_LOG,
     discovery: FOOTBALL_DISCOVERY({ passing: 60, rushing: 80, receiving: 100 }).map((d) => ({ ...d, groups: 80 })),
     scoreboard: { params: { groups: 80, limit: 400 } },
     positionGroups: [
@@ -166,11 +202,13 @@ export const LEAGUES = {
     teamGames: 10,
     dvp: BASKETBALL_DVP,
     dvpGames: 10, // positions vs defense: each defense's last 10 games, across seasons
+    roster: true,
     seasonEnd: '04-13', // last regular-season day, used before the new season has games
     seasonEndYearOffset: -1,
     kind: 'basketball',
     stats: BASKETBALL_STATS,
     markets: BASKETBALL_MARKETS,
+    log: BASKETBALL_LOG,
     discovery: [
       { sort: 'offensive.avgPoints:desc', limit: 150 },
       { sort: 'general.avgRebounds:desc', limit: 50 },
@@ -194,11 +232,13 @@ export const LEAGUES = {
     teamGames: 10,
     dvp: BASKETBALL_DVP,
     dvpGames: 10, // positions vs defense: each defense's last 10 games, across seasons
+    roster: true,
     seasonEnd: '09-12',
     seasonEndYearOffset: 0,
     kind: 'basketball',
     stats: BASKETBALL_STATS,
     markets: BASKETBALL_MARKETS,
+    log: BASKETBALL_LOG,
     discovery: [
       { sort: 'offensive.avgPoints:desc', limit: 80 },
       { sort: 'general.avgRebounds:desc', limit: 30 },

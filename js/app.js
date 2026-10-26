@@ -1,9 +1,10 @@
 import { LEAGUES, LEAGUE_KEYS, LINE_FLOORS, DEFAULT_FLOOR } from './config.js';
-import { buildLeagueData } from './espn.js';
+import { buildLeagueData, fetchPlayerGames } from './espn.js';
 import { fetchMarketQuotes, nameKey } from './odds.js';
 import { buildTeamData } from './teams.js';
 import { fetchInjuries, injuriesByTeam, returningPlayers } from './injuries.js';
-import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, formatNote, bestBets, americanOdds, defenseVsPosition, usualValue, activePlayers } from './props.js';
+import { fetchRoster, searchPlayers } from './roster.js';
+import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, formatNote, bestBets, americanOdds, defenseVsPosition, usualValue, activePlayers, median } from './props.js';
 
 const STATIC_MAX_AGE = 36 * 3600e3; // pre-built data/*.json older than this triggers a live pull
 const CACHE_MAX_AGE = 3 * 3600e3;
@@ -11,6 +12,8 @@ const ODDS_MAX_AGE = 12 * 3600e3; // pre-built market prices older than this are
 const ODDS_REFRESH = 5 * 60e3; // re-pull live prices after this long
 const TEAMS_CACHE_AGE = 6 * 3600e3;
 const INJURY_REFRESH = 15 * 60e3; // re-pull the injury report after this long
+const ROSTER_MAX_AGE = 7 * 24 * 3600e3;
+const LOOKUP_REFRESH = 15 * 60e3; // re-pull a looked-up player's game log after this long
 const VENUES = { K: 'Kalshi' };
 const HEADSHOT_PATH = { nfl: 'nfl', cfb: 'college-football', nba: 'nba', wnba: 'wnba' };
 
@@ -50,15 +53,20 @@ const state = {
   odds: {}, // league -> { quotes, venues, generatedAt, log, fetchedAt }
   teams: {}, // league -> { data, error, loading, progress }
   injuries: {}, // league -> { data, loading, fetchedAt }
+  rosters: {}, // league -> { players, loading }
+  lookups: {}, // "league:playerId" -> { games, error, loading, fetchedAt }
+  pick: null, // Players tab: { league, id, name, pos, team, teamId }
+  pickMarket: null,
   expanded: null, // "playerId:marketId"
   custom: {}, // "playerId:marketId" -> custom line
   loading: false,
 };
 if (!LEAGUES[state.league]) state.league = 'nfl';
+if (state.pick && state.pick.league !== state.league) state.pick = null;
 
 function savePrefs() {
-  const { league, view, window, minRate, floor, market, upcoming, onePer } = state;
-  store.set('prefs', { league, view, window, minRate, floor, market, upcoming, onePer });
+  const { league, view, window, minRate, floor, market, upcoming, onePer, pick } = state;
+  store.set('prefs', { league, view, window, minRate, floor, market, upcoming, onePer, pick });
 }
 
 // ---------- data loading ----------
@@ -202,6 +210,41 @@ async function ensureInjuries(force = false) {
   if (key === state.league && state.view === 'matchups') render();
 }
 
+// Players tab search list: browser cache, then the pre-built file, then every team's roster live.
+async function ensureRoster() {
+  const key = state.league;
+  if (!LEAGUES[key].roster || state.rosters[key]) return;
+  state.rosters[key] = { loading: true, players: [] };
+  let data = store.get(`roster:${key}`, null);
+  if (!data || age(data) > ROSTER_MAX_AGE) data = await fetchStatic(`${key}-roster`);
+  if (!data || !data.ok || age(data) > ROSTER_MAX_AGE) {
+    const live = await fetchRoster(LEAGUES[key]);
+    if (live.ok) {
+      data = live;
+      store.set(`roster:${key}`, live);
+    }
+  }
+  state.rosters[key] = { players: (data && data.players) || [], loading: false };
+  if (key === state.league && state.view === 'players') render();
+}
+
+// The picked player's full, current game log (tracked players are capped at 25 games).
+async function ensurePlayerGames(force = false) {
+  const pick = state.pick;
+  if (!pick) return;
+  const key = `${pick.league}:${pick.id}`;
+  const cur = state.lookups[key];
+  if (cur && (cur.loading || (!force && Date.now() - cur.fetchedAt < LOOKUP_REFRESH))) return;
+  state.lookups[key] = { ...(cur || {}), loading: true };
+  try {
+    const games = await fetchPlayerGames(LEAGUES[pick.league], pick.id, { maxGames: 100, enough: 20 });
+    state.lookups[key] = { games, fetchedAt: Date.now(), loading: false };
+  } catch (err) {
+    state.lookups[key] = { ...(cur || {}), error: err, fetchedAt: Date.now(), loading: false };
+  }
+  if (state.pick && state.pick.id === pick.id && state.view === 'players') render();
+}
+
 function showTeamProgress(p) {
   const el = $('status');
   el.className = 'status';
@@ -291,12 +334,15 @@ function renderChrome() {
   }
   // Best Bets uses each market's own line, so the line pickers don't apply there;
   // Matchups is season-to-date team data, so none of the prop filters do.
+  // Players is one player's game log: only the sample and the search apply.
   const mu = state.view === 'matchups';
-  for (const id of ['minRate', 'floor']) $(id).closest('.field').hidden = state.view === 'bets' || mu;
+  const pl = state.view === 'players';
+  for (const id of ['minRate', 'floor']) $(id).closest('.field').hidden = state.view === 'bets' || mu || pl;
   $('window').closest('.field').hidden = mu;
-  $('upcoming').closest('.chk').hidden = state.view === 'bets' || mu;
-  $('onePer').closest('.chk').hidden = mu;
-  $('markets').hidden = mu;
+  $('upcoming').closest('.chk').hidden = state.view === 'bets' || mu || pl;
+  $('onePer').closest('.chk').hidden = mu || pl;
+  $('markets').hidden = mu || pl;
+  $('search').placeholder = pl ? `Search any ${LEAGUES[state.league].label} player` : 'Player or team';
   $('window').value = state.window;
   $('minRate').value = state.minRate;
   $('floor').value = state.floor;
@@ -317,6 +363,7 @@ function render() {
 
   const status = $('status');
   status.className = 'status';
+  if (state.view === 'players') return renderPlayersView(d);
   if (state.view === 'matchups' && !(d.error && !(d.players || []).length)) return renderMatchupsView(d);
   const { rows, hasSchedule } = filteredRows(d);
 
@@ -424,6 +471,7 @@ function renderDetail(r) {
       <span class="res">hit <b>${st.hits}/${st.n}</b> (${Math.round(st.rate * 100)}%)</span>
     </div>
     ${others.length ? `<h4>Other props that hit for ${esc(p.name.split(' ').slice(-1)[0])}</h4><div class="others">${others.join('')}</div>` : ''}
+    <button class="link" data-open-player="${esc(p.id)}">Full game log →</button>
   </div>`;
 }
 
@@ -435,6 +483,7 @@ function chart(games, values, line) {
   const bottom = 30;
   const max = Math.max(line * 1.25, ...values, 1);
   const bw = W / Math.max(n, 1);
+  const dense = n > 20; // a full season: bars only, details on hover
   const y = (v) => top + (H - top - bottom) * (1 - v / max);
   const bars = [];
   // oldest on the left
@@ -445,7 +494,10 @@ function chart(games, values, line) {
     const bx = x * bw + bw * 0.15;
     const w = bw * 0.7;
     bars.push(
-      `<rect x="${bx}" y="${y(v)}" width="${w}" height="${Math.max(H - bottom - y(v), 1)}" rx="3" fill="${hit ? 'var(--accent)' : 'var(--miss)'}"><title>${esc(g.d)} ${esc(g.h)} ${esc(g.o)}: ${v}</title></rect>`,
+      `<rect x="${bx}" y="${y(v)}" width="${w}" height="${Math.max(H - bottom - y(v), 1)}" rx="${dense ? 1 : 3}" fill="${hit ? 'var(--accent)' : 'var(--miss)'}"><title>${esc(g.d)} ${esc(g.h)} ${esc(g.o)}: ${v}</title></rect>`,
+    );
+    if (dense) continue;
+    bars.push(
       `<text class="val" x="${bx + w / 2}" y="${y(v) - 4}" text-anchor="middle">${fmt(v)}</text>`,
       `<text x="${bx + w / 2}" y="${H - bottom + 13}" text-anchor="middle">${esc(g.o)}</text>`,
       `<text x="${bx + w / 2}" y="${H - bottom + 25}" text-anchor="middle">${esc(g.d.slice(5).replace('-', '/'))}</text>`,
@@ -788,6 +840,167 @@ function renderDefenseTable(teams, cfg) {
   </details>`;
 }
 
+// ---------- Players: any player's game log ----------
+
+function seasonLabel(s) {
+  if (!s) return 'this season';
+  return LEAGUES[state.league].kind === 'basketball' ? `${s - 1}-${String(s).slice(2)} season` : `${s} season`;
+}
+
+function renderPlayersView(d) {
+  const status = $('status');
+  const cfg = LEAGUES[state.league];
+  $('diag').hidden = true;
+  if (state.pick) return renderPlayerCard(d);
+
+  const roster = state.rosters[state.league];
+  const tracked = d.players || [];
+  const all = (roster && roster.players) || [];
+  const total = new Set([...tracked, ...all].map((p) => p.id)).size;
+  status.innerHTML =
+    roster && roster.loading
+      ? `Loading the ${esc(cfg.label)} player list…`
+      : `Search ${total.toLocaleString()} ${esc(cfg.label)} players${cfg.roster ? '' : ' (stat leaders)'} · last 5–20 games or this season`;
+  const q = state.search.trim();
+  if (!q) {
+    $('results').innerHTML = '<div class="empty">Type a player\'s name (or a team like “SF”) above.</div>';
+    return;
+  }
+  const matches = searchPlayers(q, [tracked, all]);
+  state.matches = new Map(matches.map((p) => [p.id, p]));
+  if (!matches.length) {
+    $('results').innerHTML = `<div class="empty">No ${esc(cfg.label)} player matches “${esc(q)}”.</div>`;
+    return;
+  }
+  $('results').innerHTML = `<ul class="list">${matches
+    .map(
+      (p) => `<li class="row"><button class="pl-row" data-pick="${esc(p.id)}">
+        <img class="avatar" src="${headshot(p)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+        <span class="who">
+          <div class="name">${esc(p.name)}</div>
+          <div class="meta">${esc(p.team)}${p.pos ? ` · ${esc(p.pos)}` : ''}${gameTag(d, p)}</div>
+        </span>
+        <span class="chev" aria-hidden="true">›</span>
+      </button></li>`,
+    )
+    .join('')}</ul>`;
+}
+
+// Ladder line closest to the player's median: where a book would hang the main line.
+function mainLine(m, values) {
+  const mid = median(values);
+  return m.ladder.reduce((best, l) => (Math.abs(l - mid) < Math.abs(best - mid) ? l : best), m.ladder[0]);
+}
+
+function renderPlayerCard(d) {
+  const cfg = LEAGUES[state.league];
+  const pick = state.pick;
+  const tracked = (d.players || []).find((p) => p.id === pick.id);
+  const look = state.lookups[`${pick.league}:${pick.id}`] || {};
+  const allGames = (look.games && look.games.length ? look.games : tracked && tracked.games) || [];
+  const p = { ...pick, ...(tracked || {}), games: allGames };
+  const status = $('status');
+  status.innerHTML = look.loading ? 'Pulling the latest game log…' : '';
+  const back = state.search.trim() ? '<button class="link" data-back>← Back to results</button>' : '';
+  const head = `<div class="pl-head">
+      <img class="avatar big" src="${headshot(p)}" alt="" onerror="this.style.visibility='hidden'">
+      <div class="who"><div class="name">${esc(p.name)}</div>
+      <div class="meta">${esc(p.team)}${p.pos ? ` · ${esc(p.pos)}` : ''}${gameTag(d, p)}</div></div>
+    </div>`;
+  if (!allGames.length) {
+    const msg = look.loading
+      ? ''
+      : look.error
+        ? `Couldn't load ${esc(p.name)}'s game log (${esc(look.error.message || look.error)}). Try “Refresh” in a minute.`
+        : `No games found for ${esc(p.name)} yet.`;
+    $('results').innerHTML = `${back}<div class="pcard">${head}${msg ? `<div class="empty">${msg}</div>` : ''}</div>`;
+    return;
+  }
+
+  const win = opts().window;
+  const games = sampleGames(allGames, win);
+  const label = win === 'season' ? seasonLabel(allGames[0].s) : `Last ${games.length} games`;
+  if (look.error && !look.games) status.innerHTML = 'Showing saved games — live refresh failed.';
+
+  // Prop tiles: the markets this player plays, with avg / median over the sample.
+  const markets = cfg.markets.filter((m) => !m.yesNo && m.eligible(allGames.slice(0, 10)));
+  if (!markets.some((m) => m.id === state.pickMarket)) state.pickMarket = markets.length ? markets[0].id : null;
+  const tiles = markets
+    .map((m) => {
+      const vals = games.map((g) => m.value(g) ?? 0);
+      const avgV = vals.reduce((a, b) => a + b, 0) / vals.length;
+      return `<button class="tile" data-pm="${m.id}" aria-pressed="${m.id === state.pickMarket}">
+        <span class="tl">${esc(m.label)}</span><b>${fmt(avgV)}</b><span class="tm">med ${fmt(median(vals))}</span></button>`;
+    })
+    .join('');
+
+  let propBox = '';
+  const m = markets.find((x) => x.id === state.pickMarket);
+  if (m) {
+    const values = games.map((g) => m.value(g) ?? 0);
+    const key = `p:${p.id}:${m.id}`;
+    const base = mainLine(m, allGames.slice(0, 20).map((g) => m.value(g) ?? 0));
+    const line = state.custom[key] ?? base;
+    const st = lineStats(values, line);
+    const stepSize = m.ladder[1] - m.ladder[0] >= 5 ? 5 : 1;
+    propBox = `<div class="detail">
+      <h4>${esc(m.label)} — ${esc(label.toLowerCase())}</h4>
+      ${chart(games, values, line)}
+      <div class="custom">
+        <span>Line:</span>
+        <button data-step="-${stepSize}" data-key="${esc(key)}" data-base="${base}" aria-label="Lower line">−</button>
+        <span class="lineval">${line}+</span>
+        <button data-step="${stepSize}" data-key="${esc(key)}" data-base="${base}" aria-label="Raise line">+</button>
+        <span class="res">hit <b>${st.hits}/${st.n}</b> (${Math.round(st.rate * 100)}%)${formatNote(st) ? ` · ${esc(formatNote(st))}` : ''}</span>
+      </div>
+    </div>`;
+  }
+
+  $('results').innerHTML = `${back}<div class="pcard">${head}
+    <div class="pl-sub">${esc(label)}${look.loading ? ' · updating…' : ''}</div>
+    ${tiles ? `<div class="tiles">${tiles}</div>` : ''}
+    ${propBox}
+    ${gameLogTable(games, cfg)}
+  </div>`;
+}
+
+function gameLogTable(games, cfg) {
+  const groups = cfg.log.filter((g) => g.show(games));
+  if (!groups.length) return '<div class="empty">ESPN has no offensive stats for this player.</div>';
+  const keys = Object.keys(cfg.stats);
+  const avgGame = {};
+  for (const k of keys) avgGame[k] = Number(fmt(games.reduce((a, g) => a + (g[k] ?? 0), 0) / games.length));
+  const cell = (c, g, isAvg) => {
+    const text = c.text ? c.text(g) : isAvg ? fmt(c.value(g) ?? 0) : c.value(g) ?? 0;
+    return `<td class="num">${esc(text)}</td>`;
+  };
+  const cols = groups.flatMap((g) => g.cols.map((c, i) => ({ ...c, first: i === 0 })));
+  const groupRow =
+    groups.length > 1 || groups[0].label
+      ? `<tr class="grp"><th colspan="3"></th>${groups.map((g) => `<th colspan="${g.cols.length}">${esc(g.label)}</th>`).join('')}</tr>`
+      : '';
+  const rows = games
+    .map((g) => {
+      const res = g.r ? `<span class="${g.r === 'W' ? 'up' : g.r === 'L' ? 'down' : ''}">${esc(g.r)}</span> ${esc(g.sc)}` : esc(g.sc);
+      return `<tr><td>${esc(g.d.slice(5).replace('-', '/'))}${g.p ? ' <small class="muted">PO</small>' : ''}</td><td>${esc(g.h === '@' ? '@' : 'vs')} ${esc(g.o)}</td><td>${res}</td>${cols.map((c) => cell(c, g, false)).join('')}</tr>`;
+    })
+    .join('');
+  return `<div class="tscroll"><table class="mtable glog">
+    <thead>${groupRow}<tr><th>Date</th><th>Opp</th><th>Result</th>${cols.map((c) => `<th class="num">${esc(c.label)}</th>`).join('')}</tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td colspan="3">Average</td>${cols.map((c) => cell(c, avgGame, true)).join('')}</tr></tfoot>
+  </table></div>`;
+}
+
+function openPlayer(p) {
+  state.pick = { league: state.league, id: p.id, name: p.name, pos: p.pos || '', team: p.team || '', teamId: p.teamId || '' };
+  state.pickMarket = null;
+  savePrefs();
+  render();
+  window.scrollTo({ top: 0 });
+  ensurePlayerGames();
+}
+
 function renderSheet(rows, d) {
   const cfg = LEAGUES[state.league];
   const names = shortNames(rows.map((r) => r.player));
@@ -827,9 +1040,11 @@ $('leagues').addEventListener('click', (e) => {
   state.league = b.dataset.league;
   state.market = 'all';
   state.expanded = null;
+  state.pick = null;
   savePrefs();
   ensureData();
   ensureOdds();
+  if (state.view === 'players') ensureRoster();
   if (state.view === 'matchups') {
     ensureTeams();
     ensureInjuries();
@@ -847,6 +1062,10 @@ $('view').addEventListener('click', (e) => {
   if (state.view === 'matchups') {
     ensureTeams();
     ensureInjuries();
+  }
+  if (state.view === 'players') {
+    ensureRoster();
+    ensurePlayerGames();
   }
 });
 
@@ -878,6 +1097,7 @@ $('search').addEventListener('input', (e) => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
     state.search = e.target.value;
+    if (state.view === 'players') state.pick = null; // a new search goes back to the results
     render();
   }, 120);
 });
@@ -890,7 +1110,34 @@ $('results').addEventListener('click', async (e) => {
     dvpRow.setAttribute('aria-expanded', String(!games.hidden));
     return;
   }
+  const pickBtn = e.target.closest('[data-pick]');
+  if (pickBtn) return openPlayer(state.matches.get(pickBtn.dataset.pick));
+  if (e.target.closest('[data-back]')) {
+    state.pick = null;
+    savePrefs();
+    return render();
+  }
+  const pm = e.target.closest('[data-pm]');
+  if (pm) {
+    state.pickMarket = pm.dataset.pm;
+    return render();
+  }
+  const openBtn = e.target.closest('[data-open-player]');
+  if (openBtn) {
+    const p = (state.data[state.league].players || []).find((x) => x.id === openBtn.dataset.openPlayer);
+    if (!p) return;
+    state.view = 'players';
+    state.search = '';
+    $('search').value = '';
+    ensureRoster();
+    return openPlayer(p);
+  }
   const step = e.target.closest('[data-step]');
+  if (step && step.dataset.base) {
+    const key = step.dataset.key;
+    state.custom[key] = Math.max(0, (state.custom[key] ?? Number(step.dataset.base)) + Number(step.dataset.step));
+    return render();
+  }
   if (step) {
     const key = step.dataset.key;
     const row = filteredRows(state.data[state.league]).rows.find((r) => `${r.player.id}:${r.market.id}` === key);
@@ -928,6 +1175,7 @@ $('refresh').addEventListener('click', () => {
     ensureTeams(true);
     ensureInjuries(true);
   }
+  if (state.view === 'players') ensurePlayerGames(true);
 });
 
 $('floor').innerHTML = LINE_FLOORS.map((f) => `<option value="${f.value}">${esc(f.label)}</option>`).join('');
@@ -938,4 +1186,8 @@ if (state.view === 'bets') ensureOdds();
 if (state.view === 'matchups') {
   ensureTeams();
   ensureInjuries();
+}
+if (state.view === 'players') {
+  ensureRoster();
+  ensurePlayerGames();
 }
