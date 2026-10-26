@@ -4,7 +4,7 @@ import { fetchMarketQuotes, nameKey } from './odds.js';
 import { buildTeamData } from './teams.js';
 import { fetchInjuries, injuriesByTeam, returningPlayers } from './injuries.js';
 import { fetchRoster, searchPlayers } from './roster.js';
-import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, formatNote, bestBets, americanOdds, defenseVsPosition, usualValue, activePlayers, median } from './props.js';
+import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, formatNote, bestBets, americanOdds, defenseVsPosition, usualValue, activePlayers, median, upcomingGames } from './props.js';
 
 const STATIC_MAX_AGE = 36 * 3600e3; // pre-built data/*.json older than this triggers a live pull
 const CACHE_MAX_AGE = 3 * 3600e3;
@@ -559,18 +559,6 @@ function renderBets(rows, d) {
 
 // ---------- Matchups ----------
 
-function upcomingGames(schedule) {
-  const seen = new Set();
-  const games = [];
-  for (const [team, g] of Object.entries(schedule || {})) {
-    if (team.startsWith('id:') || g.h !== '@') continue;
-    const key = `${team}@${g.opp}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    games.push({ away: team, home: g.opp, t: g.t, live: g.live });
-  }
-  return games.sort((a, b) => String(a.t).localeCompare(String(b.t)));
-}
 
 let dvpMemo = { data: null, result: null };
 function dvpFor(d) {

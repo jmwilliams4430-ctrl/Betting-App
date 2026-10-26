@@ -44,6 +44,8 @@ Injuries come from `site.web.api.espn.com/apis/site/v2/sports/{sport}/{league}/i
 
 Matchups team defense comes from `site.api.espn.com/.../teams/{id}/schedule` and `.../summary?event={id}` box scores. "Allowed" means what opposing offenses put up. When the season has barely started (under 3 games), last season is used. The position-vs-defense numbers are computed in the browser from the tracked players' game logs.
 
+Each data build also prints a plain-text Matchups report to the GitHub Actions log (the "Matchups NFL/NBA/WNBA" groups in the "Pull game logs from ESPN" step). It has the same numbers as the Matchups tab for every upcoming game, plus each tracked player's usual number and last 10 games, so picks can be checked against the site's data.
+
 The hit rate is nudged toward 50% with (hits + 1) / (games + 2), so a 5-for-5 sample doesn't look like a sure thing. The page pulls prices live when it can and otherwise falls back to the `data/<league>-odds.json` file built by the workflow. The endpoints are undocumented, so ESPN can change them without notice.
 
 ## Running it

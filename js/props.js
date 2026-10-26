@@ -233,3 +233,17 @@ export function defenseVsPosition(players, cfg, minGames = 3) {
   }
   return { season: Number.isFinite(season) ? season : null, window: cfg.dvpGames || null, mixed, teams };
 }
+
+// Games on the schedule, one per pairing (schedule is keyed by team), soonest first.
+export function upcomingGames(schedule) {
+  const seen = new Set();
+  const games = [];
+  for (const [team, g] of Object.entries(schedule || {})) {
+    if (team.startsWith('id:') || g.h !== '@') continue;
+    const key = `${team}@${g.opp}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    games.push({ away: team, home: g.opp, t: g.t, live: g.live });
+  }
+  return games.sort((a, b) => String(a.t).localeCompare(String(b.t)));
+}
