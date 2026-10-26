@@ -14,6 +14,8 @@ test('matchupReport lists each game with defense ranks, players and injuries', (
     players: [
       { id: '9', name: 'Kenneth Walker III', pos: 'RB', team: 'KC', games: games('KC', (i) => ({ rushAtt: 20, rushYds: [173, 128, 70, 177][i], rec: 3, recYds: 20 })) },
       { id: '1', name: 'Xavier Worthy', pos: 'WR', team: 'KC', games: games('KC', (i) => ({ rec: 4, recYds: [47, 22, 52, 31][i] })) },
+      // Missed KC's last two games, not on the injury report: BACK.
+      { id: '4', name: 'Hollywood Brown', pos: 'WR', team: 'KC', games: games('KC', (i) => ({ rec: 3, recYds: 40 })).slice(2) },
     ],
   };
   const teams = {
@@ -26,6 +28,7 @@ test('matchupReport lists each game with defense ranks, players and injuries', (
   assert.match(text, /Yards allowed 237\.3 \(#1\)/);
   assert.match(text, /Kenneth Walker III RB: Rush Yds usual 150\.5, L10 173 128 70 177/);
   assert.match(text, /Xavier Worthy WR \[Q\]/);
+  assert.match(text, /Hollywood Brown WR \[BACK: missed last 2 games/);
   assert.match(text, /Injuries KC offense: Q Xavier Worthy \(WR, Ankle\)/);
   assert.match(text, /Defense: not available/, 'KC defense numbers are missing in this fixture');
   assert.doesNotThrow(() => matchupReport(LEAGUES.nba, { schedule: {}, players: [] }, null, null));
