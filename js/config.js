@@ -140,7 +140,25 @@ const BASKETBALL_TEAM_STATS = [
 ];
 // How each position group has done against a defense, by our prop markets.
 const FOOTBALL_DVP = { QBs: ['passYds', 'rushYds'], RBs: ['rushYds', 'rec'], WRs: ['recYds', 'rec'], TEs: ['recYds', 'rec'] };
-const BASKETBALL_DVP = { Guards: ['pts', 'ast', 'tpm'], Forwards: ['pts', 'reb'], Centers: ['pts', 'reb'] };
+// Basketball splits into the five positions, every stat for each.
+const BB_DVP_STATS = ['pts', 'reb', 'ast', 'tpm', 'pra'];
+const BASKETBALL_DVP = { PG: BB_DVP_STATS, SG: BB_DVP_STATS, SF: BB_DVP_STATS, PF: BB_DVP_STATS, C: BB_DVP_STATS };
+const BASKETBALL_DVP_GROUPS = ['PG', 'SG', 'SF', 'PF', 'C'].map((x) => ({ label: x, match: [x] }));
+
+// ESPN's leaderboards often say only G / F. The build swaps in the roster's position when it
+// is specific; otherwise the player's role decides: a guard averaging 4.5+ assists is a PG,
+// a forward averaging 7+ rebounds a PF.
+export function basketballPosition(p) {
+  const pos = String(p.pos || '').toUpperCase();
+  if (['PG', 'SG', 'SF', 'PF', 'C'].includes(pos)) return pos;
+  const recent = (p.games || []).slice(0, 10);
+  if (pos === 'G') return avgOf(recent, 'ast') >= 4.5 ? 'PG' : 'SG';
+  if (pos === 'F') return avgOf(recent, 'reb') >= 7 ? 'PF' : 'SF';
+  if (pos === 'GF' || pos === 'G-F') return 'SF';
+  if (pos === 'FC' || pos === 'F-C') return 'PF';
+  if (pos === 'CF' || pos === 'C-F') return 'C';
+  return null;
+}
 
 export const LEAGUES = {
   nfl: {
@@ -210,6 +228,8 @@ export const LEAGUES = {
     teamStats: BASKETBALL_TEAM_STATS,
     teamGames: 10,
     dvp: BASKETBALL_DVP,
+    dvpGroups: BASKETBALL_DVP_GROUPS,
+    dvpPosition: basketballPosition,
     dvpGames: 10, // positions vs defense: each defense's last 10 games, across seasons
     roster: true,
     seasonEnd: '04-13', // last regular-season day, used before the new season has games
@@ -240,6 +260,8 @@ export const LEAGUES = {
     teamStats: BASKETBALL_TEAM_STATS,
     teamGames: 10,
     dvp: BASKETBALL_DVP,
+    dvpGroups: BASKETBALL_DVP_GROUPS,
+    dvpPosition: basketballPosition,
     dvpGames: 10, // positions vs defense: each defense's last 10 games, across seasons
     roster: true,
     seasonEnd: '09-12',

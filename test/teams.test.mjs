@@ -178,9 +178,21 @@ test('defenseVsPosition (basketball) uses each defense\'s last 10 games across s
   const old = Array.from({ length: 12 }, (_, i) => g(`2026-04-${String(13 - i).padStart(2, '0')}`, 2026, 20));
   const players = [{ id: '1', name: 'Guard', pos: 'PG', team: 'BOS', games: [g('2026-10-20', 2027, 30), ...old] }];
   const r = defenseVsPosition(players, LEAGUES.nba);
-  const a = r.teams.NYK.Guards.pts;
+  const a = r.teams.NYK.PG.pts;
   assert.equal(a.n, 10); // last night + 9 from last season, not just the 1 new game
   assert.equal(a.games[0].d, '2026-10-20');
   assert.equal(r.window, 10);
   assert.equal(r.mixed, true);
+});
+
+test('basketball positions: specific ones kept, G / F split by role', async () => {
+  const { basketballPosition } = await import('../js/config.js');
+  const games = (ast, reb) => Array.from({ length: 5 }, () => ({ ast, reb }));
+  assert.equal(basketballPosition({ pos: 'SG', games: games(9, 2) }), 'SG');
+  assert.equal(basketballPosition({ pos: 'G', games: games(7.2, 4) }), 'PG');
+  assert.equal(basketballPosition({ pos: 'G', games: games(2.5, 3) }), 'SG');
+  assert.equal(basketballPosition({ pos: 'F', games: games(2, 9.5) }), 'PF');
+  assert.equal(basketballPosition({ pos: 'F', games: games(3, 5) }), 'SF');
+  assert.equal(basketballPosition({ pos: 'FC', games: [] }), 'PF');
+  assert.equal(basketballPosition({ pos: 'C', games: [] }), 'C');
 });

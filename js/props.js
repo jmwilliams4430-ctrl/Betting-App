@@ -167,12 +167,15 @@ export function activePlayers(players, days = 10) {
  * average, how many beat the player's usual (see usualValue) and by how much on average.
  * rank 1 = toughest defense for that group/stat (players fell furthest below their usual).
  */
+// Position group a player counts toward in Matchups (cfg.dvpGroups / dvpPosition for basketball).
+export function dvpGroupOf(p, cfg) {
+  const pos = cfg.dvpPosition ? cfg.dvpPosition(p) : p.pos;
+  const g = (cfg.dvpGroups || cfg.positionGroups).find((x) => x.match.includes(String(pos || '').toUpperCase()));
+  return g ? g.label : null;
+}
+
 export function defenseVsPosition(players, cfg, minGames = 3) {
   const markets = new Map(cfg.markets.map((m) => [m.id, m]));
-  const groupOf = (pos) => {
-    const g = cfg.positionGroups.find((x) => x.match.includes(String(pos || '').toUpperCase()));
-    return g ? g.label : null;
-  };
   let season = -Infinity;
   for (const p of players) if (p.games.length && p.games[0].s > season) season = p.games[0].s;
 
@@ -189,7 +192,7 @@ export function defenseVsPosition(players, cfg, minGames = 3) {
 
   const teams = {};
   for (const p of players) {
-    const group = groupOf(p.pos);
+    const group = dvpGroupOf(p, cfg);
     const ids = (cfg.dvp || {})[group];
     if (!ids) continue;
     for (const id of ids) {

@@ -1,6 +1,6 @@
 // Plain-text Matchups report for the build log: the same numbers as the Matchups tab
 // (defense ranks, positions vs defense, players to watch, injuries), one block per game.
-import { defenseVsPosition, usualValue, activePlayers, upcomingGames } from './props.js';
+import { defenseVsPosition, usualValue, activePlayers, upcomingGames, dvpGroupOf } from './props.js';
 import { injuriesByTeam, returningPlayers } from './injuries.js';
 
 const OFFENSE_POS = new Set(['QB', 'RB', 'FB', 'HB', 'WR', 'TE', 'T', 'G', 'C', 'OT', 'OG', 'OL', 'LT', 'RT', 'LG', 'RG']);
@@ -51,8 +51,8 @@ export function matchupReport(cfg, data, teamsData, injuries) {
     // Every tracked player on the offense: usual number and last 10 games for his position's props.
     const roster = players.filter((p) => p.team === off && (active.has(p.id) || injById.has(String(p.id)) || back.has(p.id)));
     for (const p of roster.slice(0, 14)) {
-      const g = cfg.positionGroups.find((x) => x.match.includes(String(p.pos || '').toUpperCase()));
-      const ids = (g && cfg.dvp[g.label]) || [];
+      const group = dvpGroupOf(p, cfg);
+      const ids = (group && cfg.dvp[group]) || [];
       if (!ids.length) continue;
       const x = injById.get(String(p.id));
       const tag = x
@@ -65,7 +65,7 @@ export function matchupReport(cfg, data, teamsData, injuries) {
         const last = p.games.slice(0, 10).map((gm) => fmt(m.value(gm) ?? 0)).join(' ');
         return `${m.label} usual ${fmt(usualValue(p, m, dvp.season))}, L10 ${last}`;
       });
-      out.push(`  ${p.name} ${p.pos}${tag}: ${props.join(' | ')}`);
+      out.push(`  ${p.name} ${cfg.dvpPosition && group !== p.pos ? `${group} (${p.pos})` : p.pos}${tag}: ${props.join(' | ')}`);
     }
     const offInj = (injByTeam[off] || []).filter((x) => !football || !x.pos || OFFENSE_POS.has(x.pos.toUpperCase()));
     out.push(`Injuries ${off} ${football ? 'offense' : 'roster'}: ${offInj.map(injuryText).join('; ') || 'none listed'}`);

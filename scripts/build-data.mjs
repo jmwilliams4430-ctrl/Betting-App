@@ -71,6 +71,23 @@ for (const key of keys) {
     console.log(`  roster: ${roster.ok ? `${roster.players.length} players` : 'unavailable'}`);
     for (const line of roster.log.slice(0, 3)) console.log(`  ! ${line}`);
     if (roster.ok) await writeFile(new URL(`${key}-roster.json`, outDir), JSON.stringify(roster));
+    // Basketball Matchups splits PG/SG/SF/PF/C; leaderboards often say only G / F, rosters may be specific.
+    if (roster.ok && cfg.dvpGroups) {
+      const specific = new Set(cfg.dvpGroups.flatMap((g) => g.match));
+      const rosterPos = new Map(roster.players.map((p) => [p.id, String(p.pos || '').toUpperCase()]));
+      let refined = 0;
+      for (const p of data.players) {
+        const pos = rosterPos.get(String(p.id));
+        if (pos && specific.has(pos) && pos !== p.pos) {
+          p.pos = pos;
+          refined++;
+        }
+      }
+      const counts = {};
+      for (const pos of rosterPos.values()) counts[pos] = (counts[pos] || 0) + 1;
+      console.log(`  positions: roster ${Object.entries(counts).map(([k, v]) => `${k || '?'} ${v}`).join(', ')}; ${refined} tracked players refined`);
+      if (refined) await writeFile(new URL(`${key}.json`, outDir), JSON.stringify(data));
+    }
   }
 
   // Team defense for the Matchups tab.

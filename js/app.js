@@ -5,7 +5,7 @@ import { buildTeamData } from './teams.js';
 import { fetchInjuries, injuriesByTeam, returningPlayers } from './injuries.js';
 import { fetchRoster, searchPlayers } from './roster.js';
 import { scalarRows } from './ladders.js';
-import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, formatNote, bestBets, americanOdds, defenseVsPosition, usualValue, activePlayers, median, upcomingGames } from './props.js';
+import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, formatNote, bestBets, americanOdds, defenseVsPosition, usualValue, activePlayers, median, upcomingGames, dvpGroupOf } from './props.js';
 
 const STATIC_MAX_AGE = 36 * 3600e3; // pre-built data/*.json older than this triggers a live pull
 const CACHE_MAX_AGE = 3 * 3600e3;
@@ -703,21 +703,21 @@ function matchupSide(d, teams, dvp, inj, off, def) {
   // Only players who've played recently: injured, benched and backup players drop off.
   for (const p of activePlayers(d.players || [])) {
     if (p.team !== off) continue;
-    const g = cfg.positionGroups.find((x) => x.match.includes(String(p.pos || '').toUpperCase()));
-    const ids = g && cfg.dvp[g.label];
+    const group = dvpGroupOf(p, cfg);
+    const ids = group && cfg.dvp[group];
     if (!ids) continue;
     const id = ids[0];
     const usual = usualValue(p, markets.get(id), dvp.season);
     if (!(usual > 0)) continue;
-    const a = ((dvp.teams[def] || {})[g.label] || {})[id];
-    watch.push({ p, id, usual, a, group: g.label });
+    const a = ((dvp.teams[def] || {})[group] || {})[id];
+    watch.push({ p, id, usual, a, group });
   }
   watch.sort((x, y) => (y.a ? y.a.pct : -9) - (x.a ? x.a.pct : -9));
   const watchHtml = watch
     .slice(0, 8)
     .map(
       (w) =>
-        `<li>${playerBadge(inj, w.p)}<b>${esc(w.p.name)}</b> <span class="muted">${esc(w.p.pos)}</span> · usual ${fmt(w.usual)} ${esc(marketLabel(w.id))}${
+        `<li>${playerBadge(inj, w.p)}<b>${esc(w.p.name)}</b> <span class="muted">${esc(w.group)}</span> · usual ${fmt(w.usual)} ${esc(marketLabel(w.id))}${
           w.a ? ` · <span class="${w.a.pct >= 0 ? 'up' : 'down'}">${esc(w.group)} vs ${esc(def)} ${signedPct(w.a.pct)}</span>` : ''
         }</li>`,
     )
@@ -734,7 +734,9 @@ function matchupSide(d, teams, dvp, inj, off, def) {
         : `<p class="explain">Team defense numbers for ${esc(def)} aren't available right now.</p>`
     }
     ${
-      posRows.length
+      cfg.kind === 'basketball'
+        ? dvpMatrix(dvp, def, cfg)
+        : posRows.length
         ? `<div class="tscroll"><table class="mtable">
       <thead><tr><th>Vs position</th><th class="num">Avg</th><th class="num">Beat usual</th><th class="num">Vs usual</th><th>Rank</th></tr></thead>
       <tbody>${posRows.join('')}</tbody>
@@ -744,6 +746,56 @@ function matchupSide(d, teams, dvp, inj, off, def) {
     ${watchHtml ? `<h4>${esc(off)} players to watch</h4><ul class="watch">${watchHtml}</ul>` : ''}
     ${injurySection(inj, off, def)}
   </section>`;
+}
+
+// Basketball: one row per position, a column per stat (avg, vs usual, rank). Tap a row for
+// the games behind it, every stat side by side.
+function dvpMatrix(dvp, def, cfg) {
+  const stats = [...new Set(Object.values(cfg.dvp).flat())];
+  const short = { pts: 'PTS', reb: 'REB', ast: 'AST', tpm: '3PM', pra: 'PRA' };
+  const rows = [];
+  for (const group of Object.keys(cfg.dvp)) {
+    const byStat = (dvp.teams[def] || {})[group] || {};
+    if (!stats.some((id) => byStat[id])) continue;
+    const cells = stats
+      .map((id) => {
+        const a = byStat[id];
+        if (!a) return '<td class="num muted">–</td>';
+        const cls = !a.rank || !a.of ? '' : a.rank <= Math.ceil(a.of / 4) ? 'tough' : a.rank > a.of - Math.ceil(a.of / 4) ? 'soft' : '';
+        return `<td class="num mcell ${cls}" title="${esc(marketLabel(id))}: ${a.overs}/${a.n} beat their usual"><b>${fmt(a.avg)}</b><small>${signedPct(a.pct)}${a.rank ? ` #${a.rank}` : ''}</small></td>`;
+      })
+      .join('');
+    // Each player-game once, with every stat.
+    const games = new Map();
+    for (const id of stats) {
+      for (const x of (byStat[id] && byStat[id].games) || []) {
+        const k = `${x.name}|${x.d}`;
+        if (!games.has(k)) games.set(k, { ...x, s: {} });
+        games.get(k).s[id] = x;
+      }
+    }
+    const list = [...games.values()]
+      .sort((a, b) => String(b.d).localeCompare(String(a.d)))
+      .map(
+        (g) =>
+          `<li><span class="when">${esc(g.d.slice(5).replace('-', '/'))}</span><span class="who">${esc(g.name)} <span class="muted">${esc(g.team)}</span></span><span class="line">${stats
+            .filter((id) => g.s[id])
+            .map((id) => `<span class="${g.s[id].v > g.s[id].usual ? 'up' : 'down'}" title="usual ${fmt(g.s[id].usual)}">${fmt(g.s[id].v)} ${short[id] || id}</span>`)
+            .join(' ')}</span></li>`,
+      )
+      .join('');
+    const n = Math.max(...stats.map((id) => (byStat[id] ? byStat[id].n : 0)));
+    rows.push(
+      `<tr class="dvp-row" data-dvp tabindex="0" aria-expanded="false"><td><b>${esc(group)}</b> <small class="muted">${n}</small></td>${cells}</tr>
+      <tr class="dvp-games-row" hidden><td colspan="${stats.length + 1}"><ul class="dvp-games bb">${list}</ul></td></tr>`,
+    );
+  }
+  if (!rows.length) return `<p class="explain">No tracked players have faced ${esc(def)} in its recent games.</p>`;
+  return `<div class="tscroll"><table class="mtable dvp-matrix">
+    <thead><tr><th>Vs position</th>${stats.map((id) => `<th class="num">${short[id] || esc(marketLabel(id))}</th>`).join('')}</tr></thead>
+    <tbody>${rows.join('')}</tbody>
+  </table></div>
+  <p class="explain">Each cell: their average, how far above or below their usual number they went, and the rank (#1 = toughest; red = tough, green = soft). The small number is how many player-games it covers. Tap a position for the games (green = beat his usual).</p>`;
 }
 
 // ---------- Injuries in Matchups ----------

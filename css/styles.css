@@ -209,6 +209,16 @@ button, select, input { font: inherit; color: inherit; }
 .glog tfoot td { font-weight: 700; border-bottom: 0; }
 .glog .muted { color: var(--muted); }
 
+/* Basketball positions vs defense */
+.dvp-matrix { font-size: 13px; }
+.dvp-matrix th, .dvp-matrix td { padding-right: 7px; }
+.dvp-matrix td.mcell { line-height: 1.15; }
+.dvp-matrix td.mcell small { display: block; font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.dvp-matrix td.mcell.tough small { color: var(--miss); }
+.dvp-matrix td.mcell.soft small { color: var(--accent); }
+.dvp-games.bb li { grid-template-columns: 40px minmax(0, 1fr); row-gap: 1px; padding-bottom: 3px; }
+.dvp-games.bb .line { grid-column: 2; display: flex; gap: 8px; flex-wrap: wrap; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+
 /* Injuries (Matchups) */
 .mu-spots .chip-inj { color: var(--miss); }
 .mu-spots .chip-back { color: var(--accent); }
