@@ -193,6 +193,16 @@ test('basketball positions: specific ones kept, G / F split by role', async () =
   assert.equal(basketballPosition({ pos: 'G', games: games(2.5, 3) }), 'SG');
   assert.equal(basketballPosition({ pos: 'F', games: games(2, 9.5) }), 'PF');
   assert.equal(basketballPosition({ pos: 'F', games: games(3, 5) }), 'SF');
+  const big = Array.from({ length: 5 }, () => ({ ast: 1, reb: 6, tpm: 0.2 }));
+  assert.equal(basketballPosition({ pos: 'F', games: big }), 'PF', 'a low-3PT big with 6 boards');
   assert.equal(basketballPosition({ pos: 'FC', games: [] }), 'PF');
   assert.equal(basketballPosition({ pos: 'C', games: [] }), 'C');
+});
+
+test('defenseVsPosition skips playoff games (one opponent over and over)', () => {
+  const g = (d, o, pts, p = 0) => ({ d, o, s: 2027, p, min: 30, pts, reb: 4, ast: 7, tpm: 2 });
+  const games = [g('2026-10-25', 'BOS', 30), g('2026-10-23', 'NYK', 25), g('2026-10-21', 'MIA', 28),
+    g('2026-05-10', 'BOS', 40, 1), g('2026-05-08', 'BOS', 41, 1), g('2026-05-06', 'BOS', 39, 1)];
+  const r = defenseVsPosition([{ id: '1', name: 'P', pos: 'PG', team: 'PHI', games }], LEAGUES.nba, 1);
+  assert.equal(r.teams.BOS.PG.pts.n, 1);
 });

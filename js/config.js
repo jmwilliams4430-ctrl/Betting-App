@@ -145,15 +145,18 @@ const BB_DVP_STATS = ['pts', 'reb', 'ast', 'tpm', 'pra'];
 const BASKETBALL_DVP = { PG: BB_DVP_STATS, SG: BB_DVP_STATS, SF: BB_DVP_STATS, PF: BB_DVP_STATS, C: BB_DVP_STATS };
 const BASKETBALL_DVP_GROUPS = ['PG', 'SG', 'SF', 'PF', 'C'].map((x) => ({ label: x, match: [x] }));
 
-// ESPN's leaderboards often say only G / F. The build swaps in the roster's position when it
-// is specific; otherwise the player's role decides: a guard averaging 4.5+ assists is a PG,
-// a forward averaging 7+ rebounds a PF.
+// ESPN lists most players only as G / F (rosters too). The build swaps in the roster's position
+// when it is specific; otherwise the player's role decides: a guard averaging 4.5+ assists is
+// a PG; a forward averaging 7+ rebounds, or 5.5+ with under 1.2 threes, is a PF.
 export function basketballPosition(p) {
   const pos = String(p.pos || '').toUpperCase();
   if (['PG', 'SG', 'SF', 'PF', 'C'].includes(pos)) return pos;
   const recent = (p.games || []).slice(0, 10);
   if (pos === 'G') return avgOf(recent, 'ast') >= 4.5 ? 'PG' : 'SG';
-  if (pos === 'F') return avgOf(recent, 'reb') >= 7 ? 'PF' : 'SF';
+  if (pos === 'F') {
+    const reb = avgOf(recent, 'reb');
+    return reb >= 7 || (reb >= 5.5 && avgOf(recent, 'tpm') < 1.2) ? 'PF' : 'SF';
+  }
   if (pos === 'GF' || pos === 'G-F') return 'SF';
   if (pos === 'FC' || pos === 'F-C') return 'PF';
   if (pos === 'CF' || pos === 'C-F') return 'C';

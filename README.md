@@ -7,7 +7,7 @@ A cheatsheet-style website showing how often NFL, college football, NBA and WNBA
 - **Matchups** (NFL, NBA, WNBA): the upcoming games. For each team's defense it shows:
   - Season averages and league ranks for points, yards, passing and rushing yards allowed, sacks and takeaways (basketball: points, rebounds, assists, 3PM allowed, opponent FG%).
   - How each position group has done against that defense: their average, how many beat their usual number (each player's median), and by how much.
-  - Basketball splits this into the five positions (PG, SG, SF, PF, C), with points, rebounds, assists, 3PM and PRA for each. ESPN's leaderboards usually list only G / F, so the build takes the position from the team roster when it's specific. Otherwise a guard averaging 4.5+ assists counts as a PG and a forward averaging 7+ rebounds as a PF. Tap a position to see every game behind it.
+  - Basketball splits this into the five positions (PG, SG, SF, PF, C), with points, rebounds, assists, 3PM and PRA for each. ESPN lists most players only as G / F (its rosters too), so the build uses the roster's position when it's specific. Otherwise the player's role decides: a guard averaging 4.5+ assists is a PG, and a forward averaging 7+ rebounds (or 5.5+ with under 1.2 threes) is a PF. Positions vs defense count regular-season games only, so last season's playoff series don't fill a team's sample. Tap a position to see every game behind it.
   - The opposing players to watch.
 
   Ranks: #1 is the toughest defense, and green marks a soft spot for overs.

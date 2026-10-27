@@ -181,13 +181,14 @@ export function defenseVsPosition(players, cfg, minGames = 3) {
 
   // cfg.dvpGames (basketball): each defense's last N games across seasons, so a new season's
   // first nights count right away without leaving a 1-game sample. Otherwise: this season only.
+  // Regular season only, like team defense: a playoff series is one opponent over and over.
   const recent = {};
   if (cfg.dvpGames) {
     const dates = {};
-    for (const p of players) for (const g of p.games) if (g.o && g.d) (dates[g.o] = dates[g.o] || new Set()).add(g.d);
+    for (const p of players) for (const g of p.games) if (g.o && g.d && !g.p) (dates[g.o] = dates[g.o] || new Set()).add(g.d);
     for (const [team, set] of Object.entries(dates)) recent[team] = new Set([...set].sort().reverse().slice(0, cfg.dvpGames));
   }
-  const counts = (g) => (cfg.dvpGames ? recent[g.o] && recent[g.o].has(g.d) : g.s === season);
+  const counts = (g) => !g.p && (cfg.dvpGames ? recent[g.o] && recent[g.o].has(g.d) : g.s === season);
   let mixed = false;
 
   const teams = {};
