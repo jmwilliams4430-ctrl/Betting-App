@@ -5,7 +5,7 @@ import { buildTeamData } from './teams.js';
 import { fetchInjuries, injuriesByTeam, returningPlayers } from './injuries.js';
 import { fetchRoster, searchPlayers } from './roster.js';
 import { scalarRows } from './ladders.js';
-import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, formatNote, bestBets, americanOdds, defenseVsPosition, usualValue, activePlayers, median, upcomingGames, dvpGroupOf } from './props.js';
+import { computeRows, onePerPlayer, lineStats, sampleGames, bestLine, bestUnderLine, formatNote, bestBets, americanOdds, defenseVsPosition, usualValue, activePlayers, median, upcomingGames, dvpGroupOf } from './props.js';
 
 const STATIC_MAX_AGE = 36 * 3600e3; // pre-built data/*.json older than this triggers a live pull
 const CACHE_MAX_AGE = 3 * 3600e3;
@@ -56,6 +56,7 @@ const state = {
   injuries: {}, // league -> { data, loading, fetchedAt }
   rosters: {}, // league -> { players, loading }
   lookups: {}, // "league:playerId" -> { games, error, loading, fetchedAt }
+  side: 'over', // Top hitters / Cheatsheet: 'over' (lines they clear) or 'under' (lines they stay below)
   betsKind: 'props', // Best bets: 'props' (yes/no lines) or 'ladders' (ladders + escalators)
   pick: null, // Players tab: { league, id, name, pos, team, teamId }
   pickMarket: null,
@@ -67,8 +68,8 @@ if (!LEAGUES[state.league]) state.league = 'nfl';
 if (state.pick && state.pick.league !== state.league) state.pick = null;
 
 function savePrefs() {
-  const { league, view, window, minRate, floor, market, upcoming, onePer, pick, betsKind } = state;
-  store.set('prefs', { league, view, window, minRate, floor, market, upcoming, onePer, pick, betsKind });
+  const { league, view, window, minRate, floor, market, upcoming, onePer, pick, betsKind, side } = state;
+  store.set('prefs', { league, view, window, minRate, floor, market, upcoming, onePer, pick, betsKind, side });
 }
 
 // ---------- data loading ----------
@@ -294,7 +295,16 @@ function opts() {
     minRate: Number(state.minRate),
     floor: Number(state.floor),
     minGames: state.window === 'season' ? 3 : Math.min(5, Number(state.window)),
+    under: state.side === 'under' && (state.view === 'top' || state.view === 'sheet'),
   };
+}
+
+const lineFor = (p, m, o) => (o.under ? bestUnderLine : bestLine)(p, m, o);
+const propText = (r) => (r.under ? `Under ${r.line}` : `${r.line}+`);
+
+function sideToggle() {
+  const b = (k, label) => `<button data-side="${k}" aria-pressed="${state.side === k}">${label}</button>`;
+  return `<div class="chips bets-kind">${b('over', 'Overs: lines they hit')}${b('under', 'Unders: lines they miss')}</div>`;
 }
 
 function filteredRows(d) {
@@ -388,7 +398,7 @@ function render() {
     bits.push(...betsStatus(rows));
     status.innerHTML = bits.join(' · ');
   } else {
-    bits.push(`<b>${rows.length}</b> props hitting ${Math.round(Number(state.minRate) * 100)}%+ over the ${windowLabel()}`);
+    bits.push(`<b>${rows.length}</b> ${opts().under ? 'unders staying under' : 'props hitting'} ${Math.round(Number(state.minRate) * 100)}%+ over the ${windowLabel()}`);
     if (state.upcoming && !hasSchedule) bits.push('no upcoming schedule found, showing everyone');
     if (d.source === 'stale') bits.push('showing older data — live refresh failed');
     status.innerHTML = bits.join(' · ');
@@ -408,11 +418,11 @@ function render() {
           ? 'None of the listed props beat their price over this sample right now. Try a different sample.'
           : ''
         : 'Nothing clears that bar. Try a lower hit rate, a different sample, or “Deep alts” under Lines.';
-    $('results').innerHTML = (state.view === 'bets' ? betsToggle() : '') + ((d.players || []).length && msg ? `<div class="empty">${msg}</div>` : '');
+    $('results').innerHTML = (state.view === 'bets' ? betsToggle() : sideToggle()) + ((d.players || []).length && msg ? `<div class="empty">${msg}</div>` : '');
     return;
   }
   $('results').innerHTML =
-    state.view === 'sheet' ? renderSheet(rows, d) : state.view === 'bets' ? betsToggle() + renderBets(rows, d) : renderList(rows, d);
+    state.view === 'sheet' ? sideToggle() + renderSheet(rows, d) : state.view === 'bets' ? betsToggle() + renderBets(rows, d) : sideToggle() + renderList(rows, d);
 }
 
 function gameTag(d, p) {
@@ -426,7 +436,7 @@ function dots(r) {
   // oldest -> newest, left to right
   const cells = [...r.hitsArr].reverse().map((h) => `<i class="${h ? '' : 'm'}"></i>`).join('');
   const note = formatNote(r);
-  const cls = note.startsWith('Hit') ? 'note good' : 'note';
+  const cls = /^(Hit|Under)/.test(note) ? 'note good' : 'note';
   return `${cells}${note ? `<span class="${cls}">${esc(note)}</span>` : ''}`;
 }
 
@@ -443,7 +453,7 @@ function renderList(rows, d) {
         <span class="who">
           <div class="name">${esc(p.name)}</div>
           <div class="meta">${esc(p.team)}${p.pos ? ` · ${esc(p.pos)}` : ''}${gameTag(d, p)}</div>
-          <div class="prop"><b>${r.line}+</b> ${esc(r.market.label)} <span class="pct">· median ${fmt(r.typical)}</span></div>
+          <div class="prop"><b>${propText(r)}</b> ${esc(r.market.label)} <span class="pct">· ${r.under ? `No on ${r.line}+ · ` : ''}median ${fmt(r.typical)}</span></div>
         </span>
         <span class="score ${perfect ? 'perfect' : ''}">
           <div class="frac">${r.hits}/${r.n}</div>
@@ -465,28 +475,28 @@ function renderDetail(r) {
   const line = state.custom[key] ?? r.line;
   const games = sampleGames(p.games, opts().window);
   const values = games.map((g) => r.market.value(g) ?? 0);
-  const st = lineStats(values, line);
+  const st = lineStats(values, line, r.under);
   const others = LEAGUES[state.league].markets
     .filter((m) => m.id !== r.market.id)
-    .map((m) => bestLine(p, m, opts()))
+    .map((m) => lineFor(p, m, opts()))
     .filter(Boolean)
-    .map((o) => `<span><b>${o.line}+</b> ${esc(o.market.label)} ${o.hits}/${o.n}</span>`);
+    .map((o) => `<span><b>${propText(o)}</b> ${esc(o.market.label)} ${o.hits}/${o.n}</span>`);
   return `<div class="detail">
     <h4>${esc(r.market.label)} — ${windowLabel()}</h4>
-    ${chart(games, values, line)}
+    ${chart(games, values, line, r.under)}
     <div class="custom">
       <span>Test a line:</span>
       <button data-step="-1" data-key="${esc(key)}" aria-label="Lower line">−</button>
-      <span class="lineval">${line}+</span>
+      <span class="lineval">${r.under ? `U ${line}` : `${line}+`}</span>
       <button data-step="1" data-key="${esc(key)}" aria-label="Raise line">+</button>
-      <span class="res">hit <b>${st.hits}/${st.n}</b> (${Math.round(st.rate * 100)}%)</span>
+      <span class="res">${r.under ? 'stayed under' : 'hit'} <b>${st.hits}/${st.n}</b> (${Math.round(st.rate * 100)}%)</span>
     </div>
-    ${others.length ? `<h4>Other props that hit for ${esc(p.name.split(' ').slice(-1)[0])}</h4><div class="others">${others.join('')}</div>` : ''}
+    ${others.length ? `<h4>Other ${r.under ? 'unders' : 'props that hit'} for ${esc(p.name.split(' ').slice(-1)[0])}</h4><div class="others">${others.join('')}</div>` : ''}
     <button class="link" data-open-player="${esc(p.id)}">Full game log →</button>
   </div>`;
 }
 
-function chart(games, values, line) {
+function chart(games, values, line, under = false) {
   const n = values.length;
   const W = 640;
   const H = 170;
@@ -501,7 +511,7 @@ function chart(games, values, line) {
   for (let i = n - 1, x = 0; i >= 0; i--, x++) {
     const v = values[i];
     const g = games[i];
-    const hit = v >= line;
+    const hit = under ? v < line : v >= line;
     const bx = x * bw + bw * 0.15;
     const w = bw * 0.7;
     bars.push(
@@ -1132,14 +1142,14 @@ function renderSheet(rows, d) {
       lines.push('', g.label);
       const items = g.rows.slice(0, 25).map((r) => {
         const note = formatNote(r);
-        const text = `${names.get(r.player.id)} ${r.line}+ ${r.market.label} ${r.hits}/${r.n}${note.startsWith('Missed') ? ` (${note})` : ''}`;
+        const text = `${names.get(r.player.id)} ${r.under ? `U${r.line}` : `${r.line}+`} ${r.market.label} ${r.hits}/${r.n}${/^(Missed|Went)/.test(note) ? ` (${note})` : ''}`;
         lines.push(`- ${text}${r.hits === r.n ? ' ✅' : ''}`);
         return `<li>${esc(text)}${r.hits === r.n ? ' ✅' : ''}<span class="muted">${gameTag(d, r.player)}</span></li>`;
       });
       return `<h3>${esc(g.label)}</h3><ul>${items.join('')}</ul>`;
     })
     .join('');
-  const title = `${cfg.label} Cheatsheet`;
+  const title = `${cfg.label} ${rows.length && rows[0].under ? 'Unders ' : ''}Cheatsheet`;
   state.sheetText = `${title} (${windowLabel()})\n${lines.join('\n')}`;
   return `<div class="sheet">
     <div class="title"><h2>${esc(title)} 🚨</h2><button class="copy" id="copySheet">Copy</button></div>
@@ -1224,6 +1234,14 @@ $('results').addEventListener('click', async (e) => {
     games.hidden = !games.hidden;
     dvpRow.setAttribute('aria-expanded', String(!games.hidden));
     return;
+  }
+  const sideBtn = e.target.closest('[data-side]');
+  if (sideBtn) {
+    state.side = sideBtn.dataset.side;
+    state.expanded = null;
+    state.custom = {};
+    savePrefs();
+    return render();
   }
   const kindBtn = e.target.closest('[data-bets-kind]');
   if (kindBtn) {

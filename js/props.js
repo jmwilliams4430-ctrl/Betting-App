@@ -24,14 +24,41 @@ export function sampleGames(games, window) {
 }
 
 // Hit summary for one market at one line over a list of values (most recent first).
-export function lineStats(values, line) {
-  const hitsArr = values.map((v) => v >= line);
+// under: a "hit" is staying below the line (the NO side of "X+").
+export function lineStats(values, line, under = false) {
+  const hitsArr = values.map((v) => (under ? v < line : v >= line));
   const hits = hitsArr.filter(Boolean).length;
   let streak = 0;
   while (streak < hitsArr.length && hitsArr[streak]) streak++;
   let missedLast = 0;
   while (missedLast < hitsArr.length && !hitsArr[missedLast]) missedLast++;
-  return { line, hits, n: values.length, rate: values.length ? hits / values.length : 0, streak, missedLast, hitsArr };
+  return { line, hits, n: values.length, rate: values.length ? hits / values.length : 0, streak, missedLast, hitsArr, under };
+}
+
+/**
+ * Unders: the lowest alt line the player stayed below at least `minRate` of the time.
+ * Lines above median / floor are skipped (the mirror of the overs floor): a 350+ for a
+ * 220-yard passer is a NO nobody prices at real odds.
+ */
+export function bestUnderLine(player, market, opts = DEFAULT_OPTS) {
+  const sample = sampleGames(player.games, opts.window);
+  const minGames = opts.window === 'season' ? Math.min(3, opts.minGames) : opts.minGames;
+  if (sample.length < minGames) return null;
+  if (!market.eligible(player.games.slice(0, 10))) return null;
+  const values = sample.map((g) => market.value(g) ?? 0);
+  const typical = median(player.games.slice(0, TYPICAL_GAMES).map((g) => market.value(g) ?? 0));
+  // Yes/no bets: the under is just "no" (no TD); "under 2 TDs" is a near-certain NO nobody prices.
+  const ceiling = market.yesNo ? market.ladder[0] : typical / (opts.floor ?? DEFAULT_FLOOR);
+  for (let i = 0; i < market.ladder.length; i++) {
+    const line = market.ladder[i];
+    if (line > ceiling) break;
+    const st = lineStats(values, line, true);
+    if (st.rate >= opts.minRate) {
+      const avg = values.reduce((a, b) => a + b, 0) / values.length;
+      return { player, market, values, games: sample, avg, typical, ladderIndex: i, ...st };
+    }
+  }
+  return null;
 }
 
 /**
@@ -60,7 +87,7 @@ export function bestLine(player, market, opts = DEFAULT_OPTS) {
 }
 
 // How close the line sits to the player's typical number (1 = right at the main line).
-const lineStrength = (r) => (r.typical > 0 ? r.line / r.typical : 1);
+const lineStrength = (r) => (r.under ? (r.line > 0 ? r.typical / r.line : 0) : r.typical > 0 ? r.line / r.typical : 1);
 
 // Higher = better: hit rate first, then sample size, then the line closest to the main line.
 export function compareRows(a, b) {
@@ -69,9 +96,10 @@ export function compareRows(a, b) {
 
 export function computeRows(players, markets, opts = DEFAULT_OPTS) {
   const rows = [];
+  const pick = opts.under ? bestUnderLine : bestLine;
   for (const p of players) {
     for (const m of markets) {
-      const r = bestLine(p, m, opts);
+      const r = pick(p, m, opts);
       if (r) rows.push(r);
     }
   }
@@ -85,6 +113,12 @@ export function onePerPlayer(rows) {
 }
 
 export function formatNote(r) {
+  if (r.under) {
+    if (r.missedLast === 1) return 'Went over last game';
+    if (r.missedLast > 1) return `Went over last ${r.missedLast}`;
+    if (r.streak >= 3 && r.streak < r.n) return `Under last ${r.streak}`;
+    return '';
+  }
   if (r.missedLast === 1) return 'Missed last';
   if (r.missedLast > 1) return `Missed last ${r.missedLast}`;
   if (r.streak >= 3 && r.streak < r.n) return `Hit last ${r.streak}`;

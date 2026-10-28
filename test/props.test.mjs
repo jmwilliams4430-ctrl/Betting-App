@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { LEAGUES } from '../js/config.js';
 import { parseGamelog, toNum, buildLeagueData, guessSeason } from '../js/espn.js';
-import { bestLine, computeRows, lineStats, onePerPlayer, formatNote } from '../js/props.js';
+import { bestLine, bestUnderLine, computeRows, lineStats, onePerPlayer, formatNote } from '../js/props.js';
 
 // Shape of site.web.api.espn.com/apis/common/v3/.../athletes/{id}/gamelog
 function nflGamelog(season, rows) {
@@ -214,4 +214,35 @@ test('a full leaderboard is not mixed with last season', async () => {
   };
   await buildLeagueData(LEAGUES.nba, { fetchJson, now: new Date('2026-12-21T12:00:00Z'), maxPlayers: 1 });
   assert.ok(!urls.some((u) => u.includes('/statistics/byathlete') && u.includes('season=')));
+});
+
+test('unders: the lowest line he stayed below, never far above his median', () => {
+  // QB throwing ~220: stays under 250 in 9/10, under 225 in 6/10.
+  const ys = [210, 230, 195, 240, 215, 205, 260, 220, 235, 200];
+  const games = ys.map((y) => ({ att: 33, passYds: y, s: 2026 }));
+  const passYds = LEAGUES.nfl.markets.find((m) => m.id === 'passYds');
+  const r = bestUnderLine({ id: '1', name: 'Q B', games }, passYds, { window: 10, minRate: 0.9, minGames: 5, floor: 0.75 });
+  assert.equal(r.line, 250);
+  assert.equal(r.under, true);
+  assert.equal(r.hits, 9);
+  assert.equal(r.missedLast, 0);
+  // 100% under: 275 would do it, but a 220-yard passer's 275+ is past median / 0.9.
+  assert.equal(bestUnderLine({ id: '1', name: 'Q B', games }, passYds, { window: 10, minRate: 1, minGames: 5, floor: 0.9 }), null);
+  const rows = computeRows([{ id: '1', name: 'Q B', games }], [passYds], { window: 10, minRate: 0.9, minGames: 5, floor: 0.75, under: true });
+  assert.equal(rows[0].line, 250);
+});
+
+test('under notes read the other way round', () => {
+  const st = lineStats([300, 200, 190, 180, 210], 250, true); // most recent first
+  assert.equal(st.hits, 4);
+  assert.equal(formatNote(st), 'Went over last game');
+  assert.equal(formatNote(lineStats([200, 190, 180, 300, 210], 250, true)), 'Under last 3');
+});
+
+test('anytime TD under means no TD, never "under 2"', () => {
+  const games = Array.from({ length: 10 }, (_, i) => ({ rushAtt: 12, rushYds: 50, rushTd: i < 3 ? 1 : 0, recTd: 0, rec: 2, s: 2026 }));
+  const anyTd = LEAGUES.nfl.markets.find((m) => m.id === 'anyTd');
+  const o = { window: 10, minGames: 5, floor: 0.75 };
+  assert.equal(bestUnderLine({ id: '1', name: 'R B', games }, anyTd, { ...o, minRate: 0.7 }).line, 1);
+  assert.equal(bestUnderLine({ id: '1', name: 'R B', games }, anyTd, { ...o, minRate: 0.8 }), null);
 });
